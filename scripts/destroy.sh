@@ -21,63 +21,86 @@ fi
 rm -f -- "$cluster_error"
 
 pv_names=
-volume_ids=
+volume_ids=${PENDING_VOLUME_IDS//,/$'\n'}
 if (( cluster_exists == 1 )); then
   if [[ -z $CLUSTER_ARN ]]; then recover_cluster_identity; else verify_cluster_identity; fi
-  aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION" --kubeconfig "$KUBECONFIG_FILE"
-  chmod 600 "$KUBECONFIG_FILE"
+  if ! phase_is_pre_helm; then
+    aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION" --kubeconfig "$KUBECONFIG_FILE"
+    chmod 600 "$KUBECONFIG_FILE"
 
-  pvc_json=$(lab_kubectl get persistentvolumeclaims --namespace twc-lab --selector 'app.kubernetes.io/instance=twc-lab' --output json)
-  pv_names=$(printf '%s' "$pvc_json" | jq -r '.items[]?.spec.volumeName // empty')
-  while IFS= read -r pv_name; do
-    [[ -n $pv_name ]] || continue
-    pv_json=$(lab_kubectl get persistentvolume "$pv_name" --output json)
-    volume_id=$(printf '%s' "$pv_json" | jq -r '.spec.csi.volumeHandle // empty')
-    [[ -n $volume_id ]] && volume_ids="${volume_ids}${volume_ids:+$'\n'}${volume_id}"
-  done <<<"$pv_names"
-
-  verify_cluster_identity
-  workloads_removed=1
-  lab_helm uninstall twc-lab --namespace twc-lab --ignore-not-found --wait --timeout 15m >/dev/null 2>&1 || { failed=1; workloads_removed=0; }
-  if (( workloads_removed == 1 )); then
-    verify_cluster_identity
-    lab_kubectl delete persistentvolumeclaims --namespace twc-lab --selector 'app.kubernetes.io/instance=twc-lab' --ignore-not-found=true --wait=true --timeout=15m >/dev/null 2>&1 || failed=1
-
-    storage_deadline=$((SECONDS + STORAGE_WAIT_SECONDS))
+    pvc_json=$(lab_kubectl get persistentvolumeclaims --namespace twc-lab --selector 'app.kubernetes.io/instance=twc-lab' --output json)
+    pv_names=$(printf '%s' "$pvc_json" | jq -r '.items[]?.spec.volumeName // empty')
     while IFS= read -r pv_name; do
       [[ -n $pv_name ]] || continue
-      while :; do
-        remaining_pv=$(lab_kubectl get persistentvolume "$pv_name" --ignore-not-found=true --output name)
-        [[ -z $remaining_pv ]] && break
-        (( SECONDS >= storage_deadline )) && { failed=1; break; }
-        sleep "$POLL_SECONDS"
-      done
+      pv_json=$(lab_kubectl get persistentvolume "$pv_name" --output json)
+      volume_id=$(printf '%s' "$pv_json" | jq -r '.spec.csi.volumeHandle // empty')
+      [[ -z $volume_id || $volume_id =~ ^vol-[A-Za-z0-9]+$ ]] || die "Persistent volume $pv_name has an invalid EBS volume ID"
+      if [[ -n $volume_id ]] && ! grep -Fxq "$volume_id" <<<"$volume_ids"; then
+        volume_ids="${volume_ids}${volume_ids:+$'\n'}${volume_id}"
+      fi
     done <<<"$pv_names"
-    while IFS= read -r volume_id; do
-      [[ -n $volume_id ]] || continue
-      while :; do
-        if volume_result=$(aws ec2 describe-volumes --region "$AWS_REGION" --volume-ids "$volume_id" --query 'Volumes[].VolumeId' --output text 2>&1); then
-          [[ -z $volume_result || $volume_result == None ]] && break
-        elif [[ $volume_result == *InvalidVolume.NotFound* ]]; then
-          break
-        else
-          log "Unable to verify deletion of EBS volume $volume_id"
-          failed=1
-          break
-        fi
-        (( SECONDS >= storage_deadline )) && { failed=1; break; }
-        sleep "$POLL_SECONDS"
-      done
-    done <<<"$volume_ids"
-  fi
 
-  verify_cluster_identity
-  discovered_hostname=$(lab_kubectl get service ingress-nginx-controller --namespace ingress-nginx --output 'jsonpath={.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
-  if [[ -n $discovered_hostname ]]; then NLB_HOSTNAME=$discovered_hostname; write_state; fi
-  verify_cluster_identity
-  lab_kubectl delete service ingress-nginx-controller --namespace ingress-nginx --ignore-not-found=true >/dev/null 2>&1 || failed=1
-  verify_cluster_identity
-  lab_helm uninstall ingress-nginx --namespace ingress-nginx --ignore-not-found --wait --timeout 15m >/dev/null 2>&1 || failed=1
+    verify_cluster_identity
+    workloads_removed=1
+    lab_helm uninstall twc-lab --namespace twc-lab --ignore-not-found --wait --timeout 15m >/dev/null 2>&1 || { failed=1; workloads_removed=0; }
+    if (( workloads_removed == 1 )); then
+      pending_csv=
+      while IFS= read -r volume_id; do
+        [[ -n $volume_id ]] || continue
+        pending_csv="${pending_csv}${pending_csv:+,}${volume_id}"
+      done <<<"$volume_ids"
+      PENDING_VOLUME_IDS=$pending_csv
+      write_state
+
+      verify_cluster_identity
+      lab_kubectl delete persistentvolumeclaims --namespace twc-lab --selector 'app.kubernetes.io/instance=twc-lab' --ignore-not-found=true --wait=true --timeout=15m >/dev/null 2>&1 || failed=1
+
+      storage_deadline=$((SECONDS + STORAGE_WAIT_SECONDS))
+      while IFS= read -r pv_name; do
+        [[ -n $pv_name ]] || continue
+        while :; do
+          remaining_pv=$(lab_kubectl get persistentvolume "$pv_name" --ignore-not-found=true --output name)
+          [[ -z $remaining_pv ]] && break
+          (( SECONDS >= storage_deadline )) && { failed=1; break; }
+          sleep "$POLL_SECONDS"
+        done
+      done <<<"$pv_names"
+    fi
+
+    verify_cluster_identity
+    discovered_hostname=$(lab_kubectl get service ingress-nginx-controller --namespace ingress-nginx --output 'jsonpath={.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+    if [[ -n $discovered_hostname ]]; then NLB_HOSTNAME=$discovered_hostname; write_state; fi
+    verify_cluster_identity
+    lab_kubectl delete service ingress-nginx-controller --namespace ingress-nginx --ignore-not-found=true >/dev/null 2>&1 || failed=1
+    verify_cluster_identity
+    lab_helm uninstall ingress-nginx --namespace ingress-nginx --ignore-not-found --wait --timeout 15m >/dev/null 2>&1 || failed=1
+  fi
+fi
+
+if [[ -n $volume_ids ]]; then
+  storage_deadline=$((SECONDS + STORAGE_WAIT_SECONDS))
+  volumes_confirmed=1
+  while IFS= read -r volume_id; do
+    [[ -n $volume_id ]] || continue
+    while :; do
+      if volume_result=$(aws ec2 describe-volumes --region "$AWS_REGION" --volume-ids "$volume_id" --query 'Volumes[].VolumeId' --output text 2>&1); then
+        [[ -z $volume_result || $volume_result == None ]] && break
+      elif [[ $volume_result == *InvalidVolume.NotFound* ]]; then
+        break
+      else
+        log "Unable to verify deletion of EBS volume $volume_id"
+        failed=1
+        volumes_confirmed=0
+        break
+      fi
+      (( SECONDS >= storage_deadline )) && { failed=1; volumes_confirmed=0; break; }
+      sleep "$POLL_SECONDS"
+    done
+  done <<<"$volume_ids"
+  if (( volumes_confirmed == 1 )); then
+    PENDING_VOLUME_IDS=
+    write_state
+  fi
 fi
 
 if [[ -n $NLB_HOSTNAME ]]; then
@@ -114,7 +137,7 @@ fi
 
 if (( failed == 0 )) && [[ $NETWORK_MODE == managed ]]; then
   if stack_status=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" --query 'Stacks[0].StackStatus' --output text 2>&1); then
-    verify_stack_identity
+    if [[ -z $VPC_STACK_ID ]]; then recover_stack_identity; else verify_stack_identity; fi
     if [[ $stack_status != DELETE_IN_PROGRESS ]]; then
       aws cloudformation delete-stack --stack-name "$STACK_NAME" --region "$AWS_REGION"
     fi

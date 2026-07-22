@@ -13,7 +13,8 @@ SUBNET_IDS=${SUBNET_IDS:-}
 # These checks intentionally precede any external command, especially AWS.
 validate_network_mode "$NETWORK_MODE"
 validate_region "$AWS_REGION"
-validate_simple_name CLUSTER_NAME "$CLUSTER_NAME"
+validate_cluster_name "$CLUSTER_NAME"
+if [[ $NETWORK_MODE == managed ]]; then validate_stack_name "${CLUSTER_NAME}-vpc"; fi
 if [[ $NETWORK_MODE == existing ]]; then
   [[ -n $VPC_ID ]] || die "VPC_ID is required in existing mode"
   [[ $VPC_ID =~ ^vpc-[A-Za-z0-9]+$ ]] || die "Invalid VPC_ID"
@@ -49,7 +50,7 @@ if [[ $NETWORK_MODE == managed ]]; then
   intended_stack="${CLUSTER_NAME}-vpc"
   if stack_check=$(aws cloudformation describe-stacks --stack-name "$intended_stack" --region "$AWS_REGION" --query 'Stacks[0].StackStatus' --output text 2>&1); then
     (( state_present == 1 )) || die "Stack $intended_stack exists without tracked deployment state"
-    verify_stack_identity
+    if [[ -z $VPC_STACK_ID ]]; then recover_stack_identity; else verify_stack_identity; fi
   elif [[ $stack_check != *ValidationError* || $stack_check != *"does not exist"* ]]; then
     die "Unable to verify whether CloudFormation stack $intended_stack exists"
   elif (( state_present == 1 )) && [[ -n $VPC_STACK_ID ]]; then

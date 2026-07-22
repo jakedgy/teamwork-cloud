@@ -211,6 +211,7 @@ ln -s "$(command -v dirname)" "$NO_MAKE_BIN/dirname"
 for tool in aws eksctl helm kubectl openssl; do
   ln -s "$FAKE_BIN/$tool" "$NO_MAKE_BIN/$tool"
 done
+ln -s "$(command -v jq)" "$NO_MAKE_BIN/jq"
 
 NO_KUBE_BIN="$TEST_ROOT/no-kube-bin"
 mkdir -p "$NO_KUBE_BIN"
@@ -309,12 +310,14 @@ ACCOUNT_ID=111122223333
 AWS_REGION=us-east-2
 CLUSTER_NAME=twc-lab
 NETWORK_MODE=$mode
+PHASE=DEPLOYED
 DEPLOYMENT_ID=0123456789abcdef0123456789abcdef
 CLUSTER_ARN=arn:aws:eks:us-east-2:111122223333:cluster/twc-lab
 VPC_ID=vpc-123456
 SUBNET_IDS=subnet-a,subnet-b
 STACK_NAME=twc-lab-vpc
 VPC_STACK_ID=arn:aws:cloudformation:us-east-2:111122223333:stack/twc-lab-vpc/stack123
+PENDING_VOLUME_IDS=
 FAILED_SERVICE=
 NLB_HOSTNAME=lab.example.test
 EOF
@@ -372,8 +375,9 @@ if grep -Fq -- "--kubeconfig $CASE_DIR/.twc-lab/kubeconfig" "$CALLS" && ! grep -
 if [[ $(file_mode "$CASE_DIR/.twc-lab/state.env") == 600 ]]; then record "state file permissions are 0600" pass; else record "state file permissions are 0600" fail; fi
 if [[ $(file_mode "$CASE_DIR/.twc-lab/secrets.yaml") == 600 ]]; then record "secrets file permissions are 0600" pass; else record "secrets file permissions are 0600" fail; fi
 if grep -Eq '^secrets:$' "$CASE_DIR/.twc-lab/secrets.yaml" && grep -Eq '^  artemisPassword: "[0-9a-f]{32}"$' "$CASE_DIR/.twc-lab/secrets.yaml"; then record "secret uses the chart password key and 32 characters" pass; else record "secret uses the chart password key and 32 characters" fail; fi
-if [[ $(cut -d= -f1 "$CASE_DIR/.twc-lab/state.env" | tr '\n' ' ') == "ACCOUNT_ID AWS_REGION CLUSTER_NAME NETWORK_MODE DEPLOYMENT_ID CLUSTER_ARN VPC_ID SUBNET_IDS STACK_NAME VPC_STACK_ID FAILED_SERVICE NLB_HOSTNAME " ]]; then record "state contains only fixed keys" pass; else record "state contains only fixed keys" fail; fi
+if [[ $(cut -d= -f1 "$CASE_DIR/.twc-lab/state.env" | tr '\n' ' ') == "ACCOUNT_ID AWS_REGION CLUSTER_NAME NETWORK_MODE PHASE DEPLOYMENT_ID CLUSTER_ARN VPC_ID SUBNET_IDS STACK_NAME VPC_STACK_ID PENDING_VOLUME_IDS FAILED_SERVICE NLB_HOSTNAME " ]]; then record "state contains only fixed keys" pass; else record "state contains only fixed keys" fail; fi
 if grep -q '^DEPLOYMENT_ID=' "$CASE_DIR/.twc-lab/state.env" && grep -q '^CLUSTER_ARN=' "$CASE_DIR/.twc-lab/state.env" && grep -q '^VPC_STACK_ID=' "$CASE_DIR/.twc-lab/state.env"; then record "state records deployment, cluster, and stack identities" pass; else record "state records deployment, cluster, and stack identities" fail; fi
+if grep -q '^PHASE=DEPLOYED$' "$CASE_DIR/.twc-lab/state.env" && grep -q '^PENDING_VOLUME_IDS=$' "$CASE_DIR/.twc-lab/state.env"; then record "deployed state records lifecycle phase and pending storage" pass; else record "deployed state records lifecycle phase and pending storage" fail; fi
 if grep -Fq 'DeploymentId=0123456789abcdef0123456789abcdef' "$CALLS" && grep -Fq 'twc-lab:deployment-id=0123456789abcdef0123456789abcdef' "$CALLS"; then record "deployment identity tags both stack and cluster" pass; else record "deployment identity tags both stack and cluster" fail; fi
 if grep -Fq 'nodePools:' "$CASE_DIR/.twc-lab/cluster.yaml" && grep -Fq 'general-purpose' "$CASE_DIR/.twc-lab/cluster.yaml" && grep -Fq 'system' "$CASE_DIR/.twc-lab/cluster.yaml"; then record "renderer enables both Auto Mode pools" pass; else record "renderer enables both Auto Mode pools" fail; fi
 if grep -Fq 'twc-lab:deployment-id: 0123456789abcdef0123456789abcdef' "$CASE_DIR/.twc-lab/cluster.yaml"; then record "renderer requests cluster ownership tag atomically" pass; else record "renderer requests cluster ownership tag atomically" fail; fi
@@ -436,9 +440,9 @@ if [[ ! -e "$CASE_DIR/executed" ]]; then record "state parser never executes val
 new_case
 write_state managed
 expect_ok "status emits JSON with live operational layers" run_script status.sh JSON=1 FAKE_NLB_HOST=live.example.test
-if ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' "$TEST_ROOT/out" && grep -Fq '"helmReleases":' "$TEST_ROOT/out" && grep -Fq '"pods":' "$TEST_ROOT/out" && grep -Fq '"pvcs":' "$TEST_ROOT/out" && grep -Fq '"ingressHostname":"live.example.test"' "$TEST_ROOT/out" && grep -Fq '"simulatorHealth":' "$TEST_ROOT/out" && grep -Fq '"layerExplanation":' "$TEST_ROOT/out"; then record "JSON status includes every required operational layer" pass; else record "JSON status includes every required operational layer" fail; fi
+if ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' "$TEST_ROOT/out" && grep -Fq '"phase":"DEPLOYED"' "$TEST_ROOT/out" && grep -Fq '"pendingVolumeIds":""' "$TEST_ROOT/out" && grep -Fq '"helmReleases":' "$TEST_ROOT/out" && grep -Fq '"pods":' "$TEST_ROOT/out" && grep -Fq '"pvcs":' "$TEST_ROOT/out" && grep -Fq '"ingressHostname":"live.example.test"' "$TEST_ROOT/out" && grep -Fq '"simulatorHealth":' "$TEST_ROOT/out" && grep -Fq '"layerExplanation":' "$TEST_ROOT/out"; then record "JSON status includes every required operational layer" pass; else record "JSON status includes every required operational layer" fail; fi
 expect_ok "status emits a human operational summary" run_script status.sh FAKE_NLB_HOST=live.example.test
-if grep -Fq 'Helm releases:' "$TEST_ROOT/out" && grep -Fq 'Pods:' "$TEST_ROOT/out" && grep -Fq 'PVCs:' "$TEST_ROOT/out" && grep -Fq 'Ingress:' "$TEST_ROOT/out" && grep -Fq 'Simulator health:' "$TEST_ROOT/out" && grep -Fq 'Layers:' "$TEST_ROOT/out"; then record "human status includes every required operational layer" pass; else record "human status includes every required operational layer" fail; fi
+if grep -Fq 'Phase:          DEPLOYED' "$TEST_ROOT/out" && grep -Fq 'Pending volumes: none' "$TEST_ROOT/out" && grep -Fq 'Helm releases:' "$TEST_ROOT/out" && grep -Fq 'Pods:' "$TEST_ROOT/out" && grep -Fq 'PVCs:' "$TEST_ROOT/out" && grep -Fq 'Ingress:' "$TEST_ROOT/out" && grep -Fq 'Simulator health:' "$TEST_ROOT/out" && grep -Fq 'Layers:' "$TEST_ROOT/out"; then record "human status includes every required operational layer" pass; else record "human status includes every required operational layer" fail; fi
 
 new_case
 write_state managed
@@ -481,8 +485,12 @@ new_case
 write_state managed
 expect_fail "storage lookup failure blocks cluster cleanup" run_script destroy.sh CONFIRM=1 FAKE_PVC_PRESENT=1 FAKE_VOLUME_LOOKUP_ERROR=1
 if [[ -f "$CASE_DIR/.twc-lab/state.env" ]]; then record "storage verification failure preserves state" pass; else record "storage verification failure preserves state" fail; fi
+if grep -q '^PENDING_VOLUME_IDS=vol-pvc123$' "$CASE_DIR/.twc-lab/state.env"; then record "failed storage wait persists exact pending volume" pass; else record "failed storage wait persists exact pending volume" fail; fi
 assert_no_call "storage verification failure prevents cluster deletion" "eksctl delete cluster"
 assert_no_call "storage verification failure preserves managed VPC" "aws cloudformation delete-stack"
+: >"$CALLS"
+expect_ok "storage cleanup retry consumes persisted pending volume" run_script destroy.sh CONFIRM=1
+assert_order "retry verifies pending volume before cluster deletion" "aws ec2 describe-volumes --region us-east-2 --volume-ids vol-pvc123" "eksctl delete cluster"
 
 new_case
 write_state managed
@@ -556,6 +564,7 @@ if grep -q '^CLUSTER_ARN=arn:aws:eks:' "$CASE_DIR/.twc-lab/state.env"; then reco
 assert_no_call "atomic cluster tag needs no tag-resource fallback" "aws eks tag-resource"
 : >"$CALLS"
 expect_ok "destroy succeeds after failed-create ARN recovery" run_script destroy.sh CONFIRM=1
+assert_no_call "pre-Helm recovery destroy bypasses Kubernetes API" "kubectl "
 
 new_case
 expect_fail "missing deployment tag refuses cluster adoption" run_script deploy.sh CONFIRM=1 FAKE_CLUSTER_DEPLOYMENT_ID=None
@@ -587,6 +596,20 @@ new_case
 write_state managed
 rm -f "$FAKE_CLUSTER_MARK" "$FAKE_STACK_MARK"
 expect_ok "destroy treats a precisely absent managed stack as success" run_script destroy.sh CONFIRM=1
+
+new_case
+write_state managed
+sed 's/^VPC_STACK_ID=.*/VPC_STACK_ID=/' "$CASE_DIR/.twc-lab/state.env" >"$CASE_DIR/.twc-lab/state.env.new"
+mv "$CASE_DIR/.twc-lab/state.env.new" "$CASE_DIR/.twc-lab/state.env"
+expect_ok "destroy recovers a missing exact stack ID from matching identity" run_script destroy.sh CONFIRM=1
+
+new_case
+write_state managed
+rm -f "$FAKE_CLUSTER_MARK"
+sed 's/^VPC_STACK_ID=.*/VPC_STACK_ID=/' "$CASE_DIR/.twc-lab/state.env" >"$CASE_DIR/.twc-lab/state.env.new"
+mv "$CASE_DIR/.twc-lab/state.env.new" "$CASE_DIR/.twc-lab/state.env"
+expect_fail "stack recovery rejects the wrong deployment identity" run_script destroy.sh CONFIRM=1 FAKE_STACK_DEPLOYMENT_ID=ffffffffffffffffffffffffffffffff
+assert_no_call "wrong stack recovery identity is never deleted" "aws cloudformation delete-stack"
 
 new_case
 write_state managed

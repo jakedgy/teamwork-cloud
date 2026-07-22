@@ -40,6 +40,14 @@ validate_simple_name() {
   [[ $value =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$ ]] || die "$label contains invalid characters"
 }
 
+validate_cluster_name() {
+  [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$ ]] || die "CLUSTER_NAME is not a valid EKS cluster name"
+}
+
+validate_stack_name() {
+  [[ $1 =~ ^[A-Za-z][A-Za-z0-9-]{0,127}$ ]] || die "Derived CloudFormation stack name is invalid"
+}
+
 validate_region() {
   [[ $1 =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]] || die "Invalid AWS region: $1"
 }
@@ -56,12 +64,12 @@ ensure_lab_dir() {
 load_state() {
   [[ -f $STATE_FILE ]] || die "State file not found: $STATE_FILE"
   local key value
-  ACCOUNT_ID= AWS_REGION= CLUSTER_NAME= NETWORK_MODE= DEPLOYMENT_ID= CLUSTER_ARN=
-  VPC_ID= SUBNET_IDS= STACK_NAME= VPC_STACK_ID= FAILED_SERVICE= NLB_HOSTNAME=
+  ACCOUNT_ID= AWS_REGION= CLUSTER_NAME= NETWORK_MODE= PHASE= DEPLOYMENT_ID= CLUSTER_ARN=
+  VPC_ID= SUBNET_IDS= STACK_NAME= VPC_STACK_ID= PENDING_VOLUME_IDS= FAILED_SERVICE= NLB_HOSTNAME=
   while IFS='=' read -r key value || [[ -n ${key:-} ]]; do
     [[ -n ${key:-} ]] || continue
     case "$key" in
-      ACCOUNT_ID|AWS_REGION|CLUSTER_NAME|NETWORK_MODE|DEPLOYMENT_ID|CLUSTER_ARN|VPC_ID|SUBNET_IDS|STACK_NAME|VPC_STACK_ID|FAILED_SERVICE|NLB_HOSTNAME)
+      ACCOUNT_ID|AWS_REGION|CLUSTER_NAME|NETWORK_MODE|PHASE|DEPLOYMENT_ID|CLUSTER_ARN|VPC_ID|SUBNET_IDS|STACK_NAME|VPC_STACK_ID|PENDING_VOLUME_IDS|FAILED_SERVICE|NLB_HOSTNAME)
         [[ $value != *$'\n'* && $value != *$'\r'* ]] || die "Invalid newline in state value"
         printf -v "$key" '%s' "$value"
         ;;
@@ -71,11 +79,21 @@ load_state() {
   [[ -n $ACCOUNT_ID && -n $AWS_REGION && -n $CLUSTER_NAME && -n $NETWORK_MODE ]] || die "State file is incomplete"
   validate_account_id "$ACCOUNT_ID"
   validate_region "$AWS_REGION"
-  validate_simple_name CLUSTER_NAME "$CLUSTER_NAME"
+  validate_cluster_name "$CLUSTER_NAME"
   validate_network_mode "$NETWORK_MODE"
+  validate_phase "$PHASE"
   [[ $DEPLOYMENT_ID =~ ^[a-f0-9]{32}$ ]] || die "State contains an invalid deployment ID"
   [[ -z $CLUSTER_ARN ]] || validate_cluster_arn "$CLUSTER_ARN"
   [[ -z $VPC_STACK_ID ]] || validate_stack_id "$VPC_STACK_ID"
+  if [[ -n $PENDING_VOLUME_IDS ]]; then
+    split_csv "$PENDING_VOLUME_IDS"
+    local volume seen_volumes=,
+    for volume in "${CSV_VALUES[@]}"; do
+      [[ $volume =~ ^vol-[A-Za-z0-9]+$ ]] || die "State contains an invalid pending volume ID"
+      [[ $seen_volumes != *",$volume,"* ]] || die "State contains a duplicate pending volume ID"
+      seen_volumes="${seen_volumes}${volume},"
+    done
+  fi
   if [[ -n $VPC_ID ]]; then
     [[ $VPC_ID =~ ^vpc-[A-Za-z0-9]+$ ]] || die "State contains an invalid VPC ID"
   fi
@@ -97,6 +115,7 @@ load_state() {
   [[ -z $NLB_HOSTNAME || $NLB_HOSTNAME =~ ^[A-Za-z0-9.-]+$ ]] || die "State contains an invalid NLB hostname"
   if [[ $NETWORK_MODE == managed ]]; then
     [[ $STACK_NAME == "${CLUSTER_NAME}-vpc" ]] || die "Managed stack is outside the cluster's scope"
+    validate_stack_name "$STACK_NAME"
   fi
 }
 
@@ -109,17 +128,53 @@ write_state() {
     printf 'AWS_REGION=%s\n' "$AWS_REGION"
     printf 'CLUSTER_NAME=%s\n' "$CLUSTER_NAME"
     printf 'NETWORK_MODE=%s\n' "$NETWORK_MODE"
+    printf 'PHASE=%s\n' "$PHASE"
     printf 'DEPLOYMENT_ID=%s\n' "$DEPLOYMENT_ID"
     printf 'CLUSTER_ARN=%s\n' "${CLUSTER_ARN:-}"
     printf 'VPC_ID=%s\n' "${VPC_ID:-}"
     printf 'SUBNET_IDS=%s\n' "${SUBNET_IDS:-}"
     printf 'STACK_NAME=%s\n' "${STACK_NAME:-}"
     printf 'VPC_STACK_ID=%s\n' "${VPC_STACK_ID:-}"
+    printf 'PENDING_VOLUME_IDS=%s\n' "${PENDING_VOLUME_IDS:-}"
     printf 'FAILED_SERVICE=%s\n' "${FAILED_SERVICE:-}"
     printf 'NLB_HOSTNAME=%s\n' "${NLB_HOSTNAME:-}"
   } >"$tmp"
   chmod 600 "$tmp"
   mv -f "$tmp" "$STATE_FILE"
+}
+
+validate_phase() {
+  case "$1" in
+    INITIALIZED|NETWORK_READY|CLUSTER_CREATING|CLUSTER_READY|HELM_STARTED|DEPLOYED) ;;
+    *) die "State contains an invalid lifecycle phase" ;;
+  esac
+}
+
+phase_rank() {
+  case "$1" in
+    INITIALIZED) printf '0\n' ;;
+    NETWORK_READY) printf '1\n' ;;
+    CLUSTER_CREATING) printf '2\n' ;;
+    CLUSTER_READY) printf '3\n' ;;
+    HELM_STARTED) printf '4\n' ;;
+    DEPLOYED) printf '5\n' ;;
+    *) die "Unknown lifecycle phase: $1" ;;
+  esac
+}
+
+advance_phase() {
+  local target=$1 current_rank target_rank
+  validate_phase "$target"
+  current_rank=$(phase_rank "$PHASE")
+  target_rank=$(phase_rank "$target")
+  if (( target_rank > current_rank )); then
+    PHASE=$target
+    write_state
+  fi
+}
+
+phase_is_pre_helm() {
+  (( $(phase_rank "$PHASE") < $(phase_rank HELM_STARTED) ))
 }
 
 validate_cluster_arn() {
@@ -179,6 +234,20 @@ verify_stack_identity() {
   tag_deployment=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" --query "Stacks[0].Tags[?Key=='twc-lab:deployment-id'].Value | [0]" --output text)
   [[ $actual_cluster == "$CLUSTER_NAME" ]] || die "Stack cluster parameter mismatch"
   [[ $parameter_deployment == "$DEPLOYMENT_ID" && $tag_deployment == "$DEPLOYMENT_ID" ]] || die "Stack deployment identity mismatch"
+}
+
+recover_stack_identity() {
+  [[ -z $VPC_STACK_ID ]] || die "Stack ID recovery is only valid for missing state identity"
+  local candidate_id actual_cluster parameter_deployment tag_deployment
+  candidate_id=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" --query 'Stacks[0].StackId' --output text)
+  validate_stack_id "$candidate_id"
+  actual_cluster=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" --query "Stacks[0].Parameters[?ParameterKey=='ClusterName'].ParameterValue | [0]" --output text)
+  parameter_deployment=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" --query "Stacks[0].Parameters[?ParameterKey=='DeploymentId'].ParameterValue | [0]" --output text)
+  tag_deployment=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" --query "Stacks[0].Tags[?Key=='twc-lab:deployment-id'].Value | [0]" --output text)
+  [[ $actual_cluster == "$CLUSTER_NAME" ]] || die "Stack cluster parameter mismatch; refusing adoption"
+  [[ $parameter_deployment == "$DEPLOYMENT_ID" && $tag_deployment == "$DEPLOYMENT_ID" ]] || die "Stack deployment identity mismatch; refusing adoption"
+  VPC_STACK_ID=$candidate_id
+  write_state
 }
 
 confirm_action() {

@@ -24,12 +24,14 @@ fi
 AWS_REGION=${AWS_REGION:-us-east-2}
 CLUSTER_NAME=${CLUSTER_NAME:-twc-lab}
 NETWORK_MODE=${NETWORK_MODE:-managed}
+PHASE=${PHASE:-INITIALIZED}
 VPC_ID=${VPC_ID:-}
 SUBNET_IDS=${SUBNET_IDS:-}
 STACK_NAME="${CLUSTER_NAME}-vpc"
 DEPLOYMENT_ID=${DEPLOYMENT_ID:-}
 CLUSTER_ARN=${CLUSTER_ARN:-}
 VPC_STACK_ID=${VPC_STACK_ID:-}
+PENDING_VOLUME_IDS=${PENDING_VOLUME_IDS:-}
 FAILED_SERVICE=${FAILED_SERVICE:-}
 NLB_HOSTNAME=${NLB_HOSTNAME:-}
 
@@ -44,7 +46,7 @@ fi
 
 if [[ $NETWORK_MODE == managed ]]; then
   if stack_status=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" --query 'Stacks[0].StackStatus' --output text 2>&1); then
-    verify_stack_identity
+    if [[ -z $VPC_STACK_ID ]]; then recover_stack_identity; else verify_stack_identity; fi
     case "$stack_status" in
       CREATE_COMPLETE|UPDATE_COMPLETE) log "Reusing identity-verified network stack $VPC_STACK_ID" ;;
       *) die "Stack $VPC_STACK_ID is $stack_status; preserve state and run destroy for scoped recovery" ;;
@@ -80,6 +82,7 @@ else
   VPC_STACK_ID=
 fi
 write_state
+advance_phase NETWORK_READY
 
 if [[ ! -f $SECRETS_FILE ]]; then
   ensure_lab_dir
@@ -97,6 +100,7 @@ if cluster_status=$(aws eks describe-cluster --name "$CLUSTER_NAME" --region "$A
   log "Reusing identity-verified EKS cluster $CLUSTER_ARN"
 elif [[ $cluster_status == *ResourceNotFoundException* ]]; then
   [[ -z $CLUSTER_ARN ]] || die "Tracked cluster $CLUSTER_ARN is absent; refusing same-name recreation"
+  advance_phase CLUSTER_CREATING
   create_failed=0
   eksctl create cluster --config-file "$CLUSTER_CONFIG" || create_failed=1
   if live_cluster=$(aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" --query 'cluster.arn' --output text 2>&1); then
@@ -110,6 +114,7 @@ elif [[ $cluster_status == *ResourceNotFoundException* ]]; then
 else
   die "Unable to verify whether tracked cluster $CLUSTER_NAME exists"
 fi
+advance_phase CLUSTER_READY
 
 aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION" --kubeconfig "$KUBECONFIG_FILE"
 chmod 600 "$KUBECONFIG_FILE"
@@ -117,6 +122,7 @@ chmod 600 "$KUBECONFIG_FILE"
 lab_helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx --force-update
 lab_helm repo update ingress-nginx
 verify_cluster_identity
+advance_phase HELM_STARTED
 lab_helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
   --version 4.13.3 --namespace ingress-nginx --create-namespace \
   --values "$SCRIPT_ROOT/cluster/ingress-nginx-values.yaml" --atomic --timeout 15m
@@ -139,7 +145,7 @@ while :; do
   sleep "$POLL_SECONDS"
 done
 [[ -n $NLB_HOSTNAME ]] || die "Timed out waiting for the ingress NLB hostname"
-write_state
+advance_phase DEPLOYED
 
 printf 'Web app:        http://%s/webapp\n' "$NLB_HOSTNAME"
 printf 'Administration: http://%s/admin\n' "$NLB_HOSTNAME"

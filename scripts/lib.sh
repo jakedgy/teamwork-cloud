@@ -157,6 +157,17 @@ verify_cluster_identity() {
   [[ $actual_deployment_id == "$DEPLOYMENT_ID" ]] || die "Cluster deployment tag mismatch"
 }
 
+recover_cluster_identity() {
+  [[ -z $CLUSTER_ARN ]] || die "Cluster ARN recovery is only valid for missing state identity"
+  local candidate_arn candidate_deployment_id
+  candidate_arn=$(aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" --query 'cluster.arn' --output text)
+  validate_cluster_arn "$candidate_arn"
+  candidate_deployment_id=$(aws eks list-tags-for-resource --resource-arn "$candidate_arn" --region "$AWS_REGION" --query 'tags."twc-lab:deployment-id"' --output text)
+  [[ $candidate_deployment_id == "$DEPLOYMENT_ID" ]] || die "Live cluster is not owned by deployment $DEPLOYMENT_ID; refusing adoption"
+  CLUSTER_ARN=$candidate_arn
+  write_state
+}
+
 verify_stack_identity() {
   [[ -n $VPC_STACK_ID ]] || die "State has no stack ID; refusing stack mutation"
   local actual_id actual_cluster parameter_deployment tag_deployment

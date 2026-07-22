@@ -23,7 +23,7 @@ rm -f -- "$cluster_error"
 pv_names=
 volume_ids=
 if (( cluster_exists == 1 )); then
-  verify_cluster_identity
+  if [[ -z $CLUSTER_ARN ]]; then recover_cluster_identity; else verify_cluster_identity; fi
   aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION" --kubeconfig "$KUBECONFIG_FILE"
   chmod 600 "$KUBECONFIG_FILE"
 

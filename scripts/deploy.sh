@@ -93,15 +93,20 @@ chmod 600 "$SECRETS_FILE"
 
 "$SCRIPT_DIR/render-cluster-config.sh" >/dev/null
 if cluster_status=$(aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" --query 'cluster.status' --output text 2>&1); then
-  verify_cluster_identity
+  if [[ -z $CLUSTER_ARN ]]; then recover_cluster_identity; else verify_cluster_identity; fi
   log "Reusing identity-verified EKS cluster $CLUSTER_ARN"
 elif [[ $cluster_status == *ResourceNotFoundException* ]]; then
   [[ -z $CLUSTER_ARN ]] || die "Tracked cluster $CLUSTER_ARN is absent; refusing same-name recreation"
-  eksctl create cluster --config-file "$CLUSTER_CONFIG"
-  CLUSTER_ARN=$(aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" --query 'cluster.arn' --output text)
-  validate_cluster_arn "$CLUSTER_ARN"
-  write_state
-  aws eks tag-resource --resource-arn "$CLUSTER_ARN" --region "$AWS_REGION" --tags "twc-lab:deployment-id=$DEPLOYMENT_ID"
+  create_failed=0
+  eksctl create cluster --config-file "$CLUSTER_CONFIG" || create_failed=1
+  if live_cluster=$(aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" --query 'cluster.arn' --output text 2>&1); then
+    recover_cluster_identity
+  elif (( create_failed == 1 )); then
+    die "eksctl failed and no deployment-owned cluster could be recovered; state is preserved"
+  else
+    die "eksctl returned success but the cluster ARN could not be verified"
+  fi
+  (( create_failed == 0 )) || die "eksctl failed after creating deployment-owned cluster $CLUSTER_ARN; state is preserved for retry or destroy"
 else
   die "Unable to verify whether tracked cluster $CLUSTER_NAME exists"
 fi

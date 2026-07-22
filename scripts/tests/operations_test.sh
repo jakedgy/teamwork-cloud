@@ -29,8 +29,20 @@ case "${1:-} ${2:-}" in
       printf '%s\n' ACTIVE
     fi
     ;;
-  "eks list-tags-for-resource") printf '%s\n' "${FAKE_CLUSTER_DEPLOYMENT_ID:-0123456789abcdef0123456789abcdef}" ;;
-  "eks tag-resource") [[ "${FAKE_CLUSTER_TAG_FAIL:-0}" != 1 ]] ;;
+  "eks list-tags-for-resource")
+    if [[ -n ${FAKE_CLUSTER_DEPLOYMENT_ID+x} ]]; then
+      printf '%s\n' "$FAKE_CLUSTER_DEPLOYMENT_ID"
+    elif [[ -f "${FAKE_CLUSTER_TAG_MARK:-/nonexistent}" ]]; then
+      sed -n '1p' "$FAKE_CLUSTER_TAG_MARK"
+    else
+      printf '%s\n' None
+    fi
+    ;;
+  "eks tag-resource")
+    [[ "${FAKE_CLUSTER_TAG_FAIL:-0}" != 1 ]] || exit 1
+    tag_value=${*: -1}
+    printf '%s\n' "${tag_value#twc-lab:deployment-id=}" >"$FAKE_CLUSTER_TAG_MARK"
+    ;;
   "eks update-kubeconfig")
     previous=
     for argument in "$@"; do
@@ -119,6 +131,14 @@ printf 'eksctl %s\n' "$*" >>"$FAKE_CALLS"
 case "${1:-} ${2:-}" in "create cluster"|"delete cluster") ;; *) printf 'unexpected eksctl command\n' >&2; exit 97 ;; esac
 if [[ "${1:-} ${2:-}" == "create cluster" ]]; then
   : >"${FAKE_CLUSTER_MARK}"
+  config_path=
+  previous=
+  for argument in "$@"; do
+    if [[ $previous == --config-file ]]; then config_path=$argument; fi
+    previous=$argument
+  done
+  sed -n 's/^    twc-lab:deployment-id: //p' "$config_path" >"$FAKE_CLUSTER_TAG_MARK"
+  if [[ "${FAKE_CREATE_CLUSTER_FAIL:-0}" == 1 ]]; then exit 1; fi
 fi
 if [[ "${1:-} ${2:-}" == "delete cluster" && "${FAKE_CLUSTER_DELETE_FAIL:-0}" == 1 ]]; then
   exit 1
@@ -203,6 +223,7 @@ export FAKE_CALLS="$CALLS"
 export FAKE_STACK_MARK="$TEST_ROOT/stack-created"
 export FAKE_CLUSTER_MARK="$TEST_ROOT/cluster-created"
 export FAKE_PVC_DELETED_MARK="$TEST_ROOT/pvc-deleted"
+export FAKE_CLUSTER_TAG_MARK="$TEST_ROOT/cluster-deployment-tag"
 export PATH="$FAKE_BIN:/usr/bin:/bin"
 export KUBECONFIG="$TEST_ROOT/external-user-context"
 
@@ -223,6 +244,7 @@ new_case() {
   rm -f "$FAKE_STACK_MARK"
   rm -f "$FAKE_CLUSTER_MARK"
   rm -f "$FAKE_PVC_DELETED_MARK"
+  rm -f "$FAKE_CLUSTER_TAG_MARK"
 }
 
 run_script() {
@@ -301,6 +323,7 @@ EOF
     : >"$FAKE_STACK_MARK"
   fi
   : >"$FAKE_CLUSTER_MARK"
+  printf '%s\n' 0123456789abcdef0123456789abcdef >"$FAKE_CLUSTER_TAG_MARK"
 }
 
 new_case
@@ -351,8 +374,9 @@ if [[ $(file_mode "$CASE_DIR/.twc-lab/secrets.yaml") == 600 ]]; then record "sec
 if grep -Eq '^secrets:$' "$CASE_DIR/.twc-lab/secrets.yaml" && grep -Eq '^  artemisPassword: "[0-9a-f]{32}"$' "$CASE_DIR/.twc-lab/secrets.yaml"; then record "secret uses the chart password key and 32 characters" pass; else record "secret uses the chart password key and 32 characters" fail; fi
 if [[ $(cut -d= -f1 "$CASE_DIR/.twc-lab/state.env" | tr '\n' ' ') == "ACCOUNT_ID AWS_REGION CLUSTER_NAME NETWORK_MODE DEPLOYMENT_ID CLUSTER_ARN VPC_ID SUBNET_IDS STACK_NAME VPC_STACK_ID FAILED_SERVICE NLB_HOSTNAME " ]]; then record "state contains only fixed keys" pass; else record "state contains only fixed keys" fail; fi
 if grep -q '^DEPLOYMENT_ID=' "$CASE_DIR/.twc-lab/state.env" && grep -q '^CLUSTER_ARN=' "$CASE_DIR/.twc-lab/state.env" && grep -q '^VPC_STACK_ID=' "$CASE_DIR/.twc-lab/state.env"; then record "state records deployment, cluster, and stack identities" pass; else record "state records deployment, cluster, and stack identities" fail; fi
-if grep -Fq 'DeploymentId=0123456789abcdef0123456789abcdef' "$CALLS" && grep -Fq 'twc-lab:deployment-id=0123456789abcdef0123456789abcdef' "$CALLS" && grep -Fq 'aws eks tag-resource' "$CALLS"; then record "deployment identity tags both stack and cluster" pass; else record "deployment identity tags both stack and cluster" fail; fi
+if grep -Fq 'DeploymentId=0123456789abcdef0123456789abcdef' "$CALLS" && grep -Fq 'twc-lab:deployment-id=0123456789abcdef0123456789abcdef' "$CALLS"; then record "deployment identity tags both stack and cluster" pass; else record "deployment identity tags both stack and cluster" fail; fi
 if grep -Fq 'nodePools:' "$CASE_DIR/.twc-lab/cluster.yaml" && grep -Fq 'general-purpose' "$CASE_DIR/.twc-lab/cluster.yaml" && grep -Fq 'system' "$CASE_DIR/.twc-lab/cluster.yaml"; then record "renderer enables both Auto Mode pools" pass; else record "renderer enables both Auto Mode pools" fail; fi
+if grep -Fq 'twc-lab:deployment-id: 0123456789abcdef0123456789abcdef' "$CASE_DIR/.twc-lab/cluster.yaml"; then record "renderer requests cluster ownership tag atomically" pass; else record "renderer requests cluster ownership tag atomically" fail; fi
 if grep -Fq 'http://lab.example.test/webapp' "$TEST_ROOT/out" && grep -Fq 'http://lab.example.test/admin' "$TEST_ROOT/out" && grep -Fq 'http://lab.example.test/admin/license' "$TEST_ROOT/out" && ! grep -Fq '/authentication' "$TEST_ROOT/out"; then record "deploy prints the required three URLs" pass; else record "deploy prints the required three URLs" fail; fi
 
 new_case
@@ -522,8 +546,24 @@ if grep -q '^DEPLOYMENT_ID=[a-f0-9]\{32\}$' "$CASE_DIR/.twc-lab/state.env"; then
 if grep -q '^VPC_STACK_ID=arn:aws:cloudformation:' "$CASE_DIR/.twc-lab/state.env"; then record "failed stack creation records exact stack identity" pass; else record "failed stack creation records exact stack identity" fail; fi
 
 new_case
-expect_fail "failed cluster tagging preserves cluster identity" run_script deploy.sh CONFIRM=1 FAKE_CLUSTER_TAG_FAIL=1
-if grep -q '^CLUSTER_ARN=arn:aws:eks:' "$CASE_DIR/.twc-lab/state.env"; then record "partial cluster deploy records exact ARN" pass; else record "partial cluster deploy records exact ARN" fail; fi
+expect_ok "atomic cluster tagging does not need tag-resource" run_script deploy.sh CONFIRM=1 FAKE_CLUSTER_TAG_FAIL=1
+if grep -q '^CLUSTER_ARN=arn:aws:eks:' "$CASE_DIR/.twc-lab/state.env"; then record "atomic cluster deploy records exact ARN" pass; else record "atomic cluster deploy records exact ARN" fail; fi
+assert_no_call "successful cluster creation avoids tag-resource fallback" "aws eks tag-resource"
+
+new_case
+expect_fail "nonzero eksctl creation recovers a matching tagged cluster" run_script deploy.sh CONFIRM=1 FAKE_CREATE_CLUSTER_FAIL=1
+if grep -q '^CLUSTER_ARN=arn:aws:eks:' "$CASE_DIR/.twc-lab/state.env"; then record "failed create persists recovered cluster ARN" pass; else record "failed create persists recovered cluster ARN" fail; fi
+assert_no_call "atomic cluster tag needs no tag-resource fallback" "aws eks tag-resource"
+: >"$CALLS"
+expect_ok "destroy succeeds after failed-create ARN recovery" run_script destroy.sh CONFIRM=1
+
+new_case
+expect_fail "missing deployment tag refuses cluster adoption" run_script deploy.sh CONFIRM=1 FAKE_CLUSTER_DEPLOYMENT_ID=None
+assert_no_call "missing tag is never force-adopted" "aws eks tag-resource"
+
+new_case
+expect_fail "wrong deployment tag refuses cluster adoption" run_script deploy.sh CONFIRM=1 FAKE_CLUSTER_DEPLOYMENT_ID=ffffffffffffffffffffffffffffffff
+assert_no_call "wrong tag is never force-adopted" "aws eks tag-resource"
 
 new_case
 expect_ok "deploy creates state for rollback detection" run_script deploy.sh CONFIRM=1

@@ -42,6 +42,9 @@ scripts/render-cluster-config.sh            eksctl config renderer
 scripts/tests/operations_test.sh             Offline script tests
 Makefile                                    Stable command surface
 README.md                                   Walkthrough and warnings
+docs/architecture.md                       Real/simulated boundaries and data flow
+docs/demo-script.md                        Short hosted-demo presentation script
+docs/runbook.md                            Deploy, inspect, recover, and destroy guide
 .github/workflows/*.yml                     Verify, publish, EKS smoke
 ```
 
@@ -446,6 +449,9 @@ Expected: PASS without real AWS calls.
 **Files:**
 - Create: `Makefile`
 - Create: `README.md`
+- Create: `docs/architecture.md`
+- Create: `docs/demo-script.md`
+- Create: `docs/runbook.md`
 - Create: `.github/workflows/verify.yml`
 - Create: `.github/workflows/image.yml`
 - Create: `.github/workflows/eks-smoke.yml`
@@ -455,7 +461,7 @@ Expected: PASS without real AWS calls.
 
 Make targets call one matching script. `verify` runs Go race tests/vet, Helm render tests, offline operation tests, and shell syntax. Add `.twc-lab/`, `coverage.out`, and `*.local.yaml` to `.gitignore`.
 
-- [ ] **Step 2: Write the README**
+- [ ] **Step 2: Write the README as the five-minute front door**
 
 Include what is real/simulated, cost and HTTP warnings, prerequisites, managed and existing VPC paths, UI tour, failure/recovery, architecture, troubleshooting, cleanup, and reference mapping. Quick start is:
 
@@ -467,21 +473,29 @@ make status
 
 Existing mode shows `NETWORK_MODE=existing VPC_ID=vpc-0123456789abcdef0 PUBLIC_SUBNET_IDS=subnet-0123456789abcdef0,subnet-0fedcba9876543210 AWS_REGION=us-east-2 make deploy` and explains the required subnet tag.
 
-- [ ] **Step 3: Add free verification and image workflows**
+- [ ] **Step 3: Write focused supporting guides**
+
+`docs/architecture.md` maps the original Teamwork Cloud example to this lab, explains the browser → NLB → ingress-nginx → simulator request path, describes the three real dependency protocols, and marks every simulated boundary.
+
+`docs/demo-script.md` is a concise presentation flow: open `/webapp`, show the license boundary, inspect all-green health, run `make demo-failure SERVICE=artemis`, watch the card fail, restore it, and close with `make destroy`. Include expected observable results and a reminder that the UI is simulated.
+
+`docs/runbook.md` contains preflight interpretation, managed and existing VPC deployment, status commands, Kubernetes diagnostics, common NLB/PVC/Pod failures, safe recovery, residual-resource checks, and teardown. Link all three guides prominently from the README.
+
+- [ ] **Step 4: Add free verification and image workflows**
 
 `verify.yml` uses Go 1.26.5, Helm 3.15.4, shellcheck, `make verify`, Docker build, non-root inspection, and Trivy with no AWS credentials. `image.yml` publishes amd64/arm64 GHCR images only for version tags or manual dispatch, tagged by version and SHA, never `latest`.
 
-- [ ] **Step 4: Add manual paid smoke workflow**
+- [ ] **Step 5: Add manual paid smoke workflow**
 
 Use OIDC, unique `twc-lab-smoke-${{ github.run_id }}`, six-hour timeout, deploy/status, Artemis failure/restore, and `if: always()` teardown. Document `AWS_ROLE_ARN` and `AWS_REGION` requirements.
 
-- [ ] **Step 5: Verify and commit**
+- [ ] **Step 6: Verify and commit**
 
 ```bash
 make verify
 docker build -t twc-lab:test .
 git diff --check
-git add .gitignore Makefile README.md .github
+git add .gitignore Makefile README.md docs/architecture.md docs/demo-script.md docs/runbook.md .github
 git commit -m "docs: add deployment workflow and automation"
 ```
 
@@ -560,3 +574,7 @@ Expected: checks PASS, no forbidden artifacts are found, and status is clean.
 - [ ] **Step 9: Request review and prepare handoff**
 
 Use `superpowers:requesting-code-review`, fix verified findings, rerun checks, then use `superpowers:finishing-a-development-branch`. Do not merge or push without user instruction.
+
+### Follow-on: Add a VS Code CodeTour
+
+After the implementation paths and EKS validation evidence are stable, create `.tours/teamwork-cloud-eks.tour` and `.vscode/extensions.json`. Recommend `vsls-contrib.codetour` and guide readers through: project framing in `README.md`; managed VPC resources; rendered `eksctl` inputs; ingress-nginx NLB values; Helm dependency workloads; Go protocol checkers; the health API/UI; failure and recovery scripts; and scoped teardown. Every tour step must explain why the file exists and link back to the longer architecture or runbook section rather than duplicating it.

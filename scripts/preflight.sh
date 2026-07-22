@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+IFS=$'\n\t'
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+enable_diagnostics
+
+AWS_REGION=${AWS_REGION:-us-east-2}
+CLUSTER_NAME=${CLUSTER_NAME:-twc-lab}
+NETWORK_MODE=${NETWORK_MODE:-managed}
+VPC_ID=${VPC_ID:-}
+SUBNET_IDS=${SUBNET_IDS:-}
+
+# These checks intentionally precede any external command, especially AWS.
+validate_network_mode "$NETWORK_MODE"
+validate_region "$AWS_REGION"
+validate_simple_name CLUSTER_NAME "$CLUSTER_NAME"
+if [[ $NETWORK_MODE == existing ]]; then
+  [[ -n $VPC_ID ]] || die "VPC_ID is required in existing mode"
+  [[ $VPC_ID =~ ^vpc-[A-Za-z0-9]+$ ]] || die "Invalid VPC_ID"
+  [[ -n $SUBNET_IDS ]] || die "SUBNET_IDS is required in existing mode"
+  split_csv "$SUBNET_IDS"
+  (( ${#CSV_VALUES[@]} >= 2 )) || die "At least two public subnet IDs are required"
+fi
+
+require_commands aws eksctl kubectl helm openssl
+
+caller_account=$(current_account)
+validate_account_id "$caller_account"
+ACCOUNT_ID=$caller_account
+
+if [[ -f $STATE_FILE ]]; then
+  requested_region=$AWS_REGION requested_cluster=$CLUSTER_NAME requested_mode=$NETWORK_MODE
+  load_state
+  [[ $ACCOUNT_ID == "$caller_account" ]] || die "Existing state belongs to AWS account $ACCOUNT_ID, caller is $caller_account"
+  [[ $AWS_REGION == "$requested_region" ]] || die "Existing state belongs to region $AWS_REGION"
+  [[ $CLUSTER_NAME == "$requested_cluster" ]] || die "Existing state belongs to cluster $CLUSTER_NAME"
+  [[ $NETWORK_MODE == "$requested_mode" ]] || die "Existing state uses network mode $NETWORK_MODE"
+else
+  if cluster_check=$(aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" --query 'cluster.status' --output text 2>&1); then
+    die "Cluster $CLUSTER_NAME already exists but is not tracked by $STATE_FILE"
+  elif [[ $cluster_check != *ResourceNotFoundException* ]]; then
+    die "Unable to verify whether cluster $CLUSTER_NAME already exists"
+  fi
+fi
+
+if [[ $NETWORK_MODE == existing ]]; then
+  vpcs=$(aws ec2 describe-vpcs --region "$AWS_REGION" --vpc-ids "$VPC_ID" --query 'Vpcs[].VpcId' --output text)
+  read -r -a found_vpcs <<<"$vpcs"
+  (( ${#found_vpcs[@]} == 1 )) && [[ ${found_vpcs[0]} == "$VPC_ID" ]] || die "VPC_ID must resolve to exactly one VPC"
+
+  split_csv "$SUBNET_IDS"
+  rows=$(aws ec2 describe-subnets --region "$AWS_REGION" --subnet-ids "${CSV_VALUES[@]}" --filters "Name=vpc-id,Values=$VPC_ID" --query "Subnets[].join(\`\\t\`,[SubnetId,AvailabilityZone,to_string(AvailableIpAddressCount),to_string(MapPublicIpOnLaunch),not_null(Tags[?Key=='kubernetes.io/role/elb']|[0].Value, \`None\`)])" --output text)
+  requested_count=${#CSV_VALUES[@]}
+  seen_count=0
+  seen_csv=,
+  az_csv=,
+  az_count=0
+  for subnet in "${CSV_VALUES[@]}"; do
+    [[ $subnet =~ ^subnet-[A-Za-z0-9]+$ ]] || die "Invalid subnet ID: $subnet"
+    [[ $seen_csv != *",$subnet,"* ]] || die "Duplicate subnet ID: $subnet"
+    seen_csv="${seen_csv}${subnet},"
+  done
+  seen_csv=,
+  while IFS=$'\t' read -r subnet az free_ips public_ip elb_role; do
+    [[ -n ${subnet:-} ]] || continue
+    requested_subnet=0
+    for requested_id in "${CSV_VALUES[@]}"; do
+      [[ $subnet == "$requested_id" ]] && requested_subnet=1
+    done
+    (( requested_subnet == 1 )) || die "AWS returned an unexpected subnet: $subnet"
+    [[ $seen_csv != *",$subnet,"* ]] || die "AWS returned subnet $subnet more than once"
+    [[ $free_ips =~ ^[0-9]+$ ]] && (( free_ips >= 16 )) || die "Subnet $subnet has fewer than 16 available IP addresses"
+    case "$public_ip" in
+      True|true) ;;
+      *) die "Subnet $subnet does not map public IPs on launch" ;;
+    esac
+    [[ $elb_role == 1 ]] || die "Subnet $subnet is missing kubernetes.io/role/elb=1"
+    seen_csv="${seen_csv}${subnet},"
+    seen_count=$((seen_count + 1))
+    if [[ $az_csv != *",$az,"* ]]; then
+      az_csv="${az_csv}${az},"
+      az_count=$((az_count + 1))
+    fi
+  done <<<"$rows"
+  (( seen_count == requested_count )) || die "Not all requested subnets exist in VPC $VPC_ID"
+  (( az_count >= 2 )) || die "Existing subnets must span at least two availability zones"
+
+  default_routes=$(aws ec2 describe-route-tables --region "$AWS_REGION" --filters "Name=vpc-id,Values=$VPC_ID" 'Name=route.destination-cidr-block,Values=0.0.0.0/0' --query "RouteTables[].Routes[?DestinationCidrBlock=='0.0.0.0/0' && starts_with(GatewayId, 'igw-')].GatewayId" --output text)
+  [[ -n $default_routes && $default_routes != None ]] || die "VPC $VPC_ID has no 0.0.0.0/0 route through an internet gateway"
+fi
+
+log "Preflight passed for account $ACCOUNT_ID, region $AWS_REGION, cluster $CLUSTER_NAME ($NETWORK_MODE network)"

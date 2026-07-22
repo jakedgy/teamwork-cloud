@@ -13,8 +13,13 @@ fi
 require_commands kubectl
 statefulset=$(statefulset_for_service "$FAILED_SERVICE")
 confirm_action "restore $FAILED_SERVICE to one replica" "$CLUSTER_NAME"
-kubectl scale statefulset "$statefulset" --replicas=1 --namespace twc-lab
-kubectl rollout status "statefulset/$statefulset" --namespace twc-lab --timeout=15m
+verify_cluster_identity
+aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION" --kubeconfig "$KUBECONFIG_FILE"
+chmod 600 "$KUBECONFIG_FILE"
+verify_cluster_identity
+lab_kubectl scale statefulset "$statefulset" --replicas=1 --namespace twc-lab
+verify_cluster_identity
+lab_kubectl rollout status "statefulset/$statefulset" --namespace twc-lab --timeout=15m
 FAILED_SERVICE=
 write_state
 log "Service restored"

@@ -22,13 +22,15 @@ if [[ $NETWORK_MODE == existing ]]; then
   (( ${#CSV_VALUES[@]} >= 2 )) || die "At least two public subnet IDs are required"
 fi
 
-require_commands aws eksctl kubectl helm make openssl
+require_commands aws eksctl jq kubectl helm make openssl
 
 caller_account=$(current_account)
 validate_account_id "$caller_account"
 ACCOUNT_ID=$caller_account
 
+state_present=0
 if [[ -f $STATE_FILE ]]; then
+  state_present=1
   requested_region=$AWS_REGION requested_cluster=$CLUSTER_NAME requested_mode=$NETWORK_MODE
   load_state
   [[ $ACCOUNT_ID == "$caller_account" ]] || die "Existing state belongs to AWS account $ACCOUNT_ID, caller is $caller_account"
@@ -46,12 +48,12 @@ fi
 if [[ $NETWORK_MODE == managed ]]; then
   intended_stack="${CLUSTER_NAME}-vpc"
   if stack_check=$(aws cloudformation describe-stacks --stack-name "$intended_stack" --region "$AWS_REGION" --query 'Stacks[0].StackStatus' --output text 2>&1); then
-    owner_tag=$(aws cloudformation describe-stacks --stack-name "$intended_stack" --region "$AWS_REGION" --query "Stacks[0].Tags[?Key=='twc-lab:managed'].Value | [0]" --output text)
-    stack_cluster=$(aws cloudformation describe-stacks --stack-name "$intended_stack" --region "$AWS_REGION" --query "Stacks[0].Parameters[?ParameterKey=='ClusterName'].ParameterValue | [0]" --output text)
-    [[ $owner_tag == true ]] || die "Stack $intended_stack exists but is not repository-managed"
-    [[ $stack_cluster == "$CLUSTER_NAME" ]] || die "Stack $intended_stack belongs to cluster $stack_cluster"
+    (( state_present == 1 )) || die "Stack $intended_stack exists without tracked deployment state"
+    verify_stack_identity
   elif [[ $stack_check != *ValidationError* || $stack_check != *"does not exist"* ]]; then
     die "Unable to verify whether CloudFormation stack $intended_stack exists"
+  elif (( state_present == 1 )) && [[ -n $VPC_STACK_ID ]]; then
+    die "Tracked stack $VPC_STACK_ID is missing; run destroy for scoped recovery"
   fi
 fi
 
@@ -97,8 +99,15 @@ if [[ $NETWORK_MODE == existing ]]; then
   (( seen_count == requested_count )) || die "Not all requested subnets exist in VPC $VPC_ID"
   (( az_count >= 2 )) || die "Existing subnets must span at least two availability zones"
 
-  default_routes=$(aws ec2 describe-route-tables --region "$AWS_REGION" --filters "Name=vpc-id,Values=$VPC_ID" 'Name=route.destination-cidr-block,Values=0.0.0.0/0' --query "RouteTables[].Routes[?DestinationCidrBlock=='0.0.0.0/0' && starts_with(GatewayId, 'igw-')].GatewayId" --output text)
-  [[ -n $default_routes && $default_routes != None ]] || die "VPC $VPC_ID has no 0.0.0.0/0 route through an internet gateway"
+  for subnet in "${CSV_VALUES[@]}"; do
+    route_table_id=$(aws ec2 describe-route-tables --region "$AWS_REGION" --filters "Name=vpc-id,Values=$VPC_ID" "Name=association.subnet-id,Values=$subnet" --query 'RouteTables[0].RouteTableId' --output text)
+    if [[ -z $route_table_id || $route_table_id == None ]]; then
+      route_table_id=$(aws ec2 describe-route-tables --region "$AWS_REGION" --filters "Name=vpc-id,Values=$VPC_ID" 'Name=association.main,Values=true' --query 'RouteTables[0].RouteTableId' --output text)
+    fi
+    [[ -n $route_table_id && $route_table_id != None ]] || die "Subnet $subnet has no effective route table"
+    default_route=$(aws ec2 describe-route-tables --region "$AWS_REGION" --route-table-ids "$route_table_id" --query "RouteTables[0].Routes[?DestinationCidrBlock=='0.0.0.0/0' && State=='active' && starts_with(GatewayId, 'igw-')].GatewayId | [0]" --output text)
+    [[ -n $default_route && $default_route == igw-* ]] || die "Subnet $subnet has no active 0.0.0.0/0 route through an internet gateway"
+  done
 fi
 
 log "Preflight passed for account $ACCOUNT_ID, region $AWS_REGION, cluster $CLUSTER_NAME ($NETWORK_MODE network)"

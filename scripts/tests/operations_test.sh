@@ -23,7 +23,20 @@ case "${1:-} ${2:-}" in
       printf 'ResourceNotFoundException\n' >&2
       exit 254
     fi
-    printf '%s\n' ACTIVE
+    if [[ "$*" == *"cluster.arn"* ]]; then
+      printf '%s\n' "${FAKE_CLUSTER_ARN:-arn:aws:eks:us-east-2:111122223333:cluster/twc-lab}"
+    else
+      printf '%s\n' ACTIVE
+    fi
+    ;;
+  "eks list-tags-for-resource") printf '%s\n' "${FAKE_CLUSTER_DEPLOYMENT_ID:-0123456789abcdef0123456789abcdef}" ;;
+  "eks tag-resource") [[ "${FAKE_CLUSTER_TAG_FAIL:-0}" != 1 ]] ;;
+  "eks update-kubeconfig")
+    previous=
+    for argument in "$@"; do
+      if [[ $previous == --kubeconfig ]]; then : >"$argument"; fi
+      previous=$argument
+    done
     ;;
   "ec2 describe-vpcs") printf '%s\n' "${FAKE_VPCS:-vpc-123456}" ;;
   "ec2 describe-subnets")
@@ -34,7 +47,17 @@ case "${1:-} ${2:-}" in
       printf '%b\n' "${FAKE_SUBNET_ROWS:-subnet-a\tus-east-2a\t32\tTrue\t1\nsubnet-b\tus-east-2b\t32\tTrue\t1}"
     fi
     ;;
-  "ec2 describe-route-tables") printf '%s\n' "${FAKE_DEFAULT_ROUTES:-igw-123456}" ;;
+  "ec2 describe-route-tables")
+    if [[ "$*" == *"association.subnet-id"* ]]; then
+      printf '%s\n' "${FAKE_EXPLICIT_ROUTE_TABLE_ID:-rtb-selected}"
+    elif [[ "$*" == *"association.main"* ]]; then
+      printf '%s\n' "${FAKE_MAIN_ROUTE_TABLE_ID:-rtb-main}"
+    elif [[ "$*" == *"--route-table-ids"* ]]; then
+      printf '%s\n' "${FAKE_SELECTED_ROUTE:-igw-123456}"
+    else
+      printf '%s\n' "${FAKE_DEFAULT_ROUTES:-igw-123456}"
+    fi
+    ;;
   "cloudformation describe-stacks")
     if [[ -n ${FAKE_STACK_ERROR:-} ]]; then
       printf '%s\n' "$FAKE_STACK_ERROR" >&2
@@ -47,16 +70,23 @@ case "${1:-} ${2:-}" in
     case "$*" in
       *"twc-lab:managed"*) printf '%s\n' "${FAKE_STACK_TAG:-true}" ;;
       *"ParameterKey=='ClusterName'"*) printf '%s\n' "${FAKE_STACK_CLUSTER:-twc-lab}" ;;
-      *"OutputKey=='VpcId'"*) printf '%s\n' vpc-managed ;;
-      *"OutputKey=='PublicSubnetIds'"*) printf '%s\n' subnet-ma,subnet-mb ;;
-      *) printf '%s\n' CREATE_COMPLETE ;;
+      *"ParameterKey=='DeploymentId'"*) printf '%s\n' "${FAKE_STACK_DEPLOYMENT_ID:-0123456789abcdef0123456789abcdef}" ;;
+      *"twc-lab:deployment-id"*) printf '%s\n' "${FAKE_STACK_DEPLOYMENT_ID:-0123456789abcdef0123456789abcdef}" ;;
+      *"StackId"*) printf '%s\n' "${FAKE_STACK_ID:-arn:aws:cloudformation:us-east-2:111122223333:stack/twc-lab-vpc/stack123}" ;;
+      *"OutputKey=='VpcId'"*) printf '%s\n' "${FAKE_VPC_OUTPUT:-vpc-managed}" ;;
+      *"OutputKey=='PublicSubnetIds'"*) printf '%s\n' "${FAKE_SUBNET_OUTPUT:-subnet-ma,subnet-mb}" ;;
+      *) printf '%s\n' "${FAKE_STACK_STATUS:-CREATE_COMPLETE}" ;;
     esac
     ;;
   "cloudformation deploy")
     [[ "$*" == *"--tags twc-lab:managed=true"* ]] || exit 2
     : >"${FAKE_STACK_MARK}"
+    [[ "${FAKE_STACK_DEPLOY_FAIL:-0}" != 1 ]] || exit 1
     ;;
-  "cloudformation delete-stack") ;;
+  "cloudformation delete-stack")
+    [[ "${FAKE_DELETE_STACK_FAIL:-0}" != 1 ]] || exit 1
+    rm -f "$FAKE_STACK_MARK"
+    ;;
   "cloudformation wait") [[ "${FAKE_STACK_DELETE_FAIL:-0}" != 1 ]] ;;
   "elbv2 describe-load-balancers")
     if [[ "$*" == *"DNSName=="* ]]; then
@@ -70,8 +100,15 @@ case "${1:-} ${2:-}" in
     fi
     ;;
   "elbv2 describe-tags") printf '%s\n' "${FAKE_RESIDUAL_ELBS:-None}" ;;
-  "ec2 describe-volumes") printf '%s\n' "${FAKE_RESIDUAL_VOLUMES:-None}" ;;
-  *) ;;
+  "ec2 describe-volumes")
+    if [[ "$*" == *"--volume-ids"* ]]; then
+      if [[ "${FAKE_VOLUME_LOOKUP_ERROR:-0}" == 1 ]]; then printf 'AccessDeniedException\n' >&2; exit 254; fi
+      printf 'InvalidVolume.NotFound\n' >&2
+      exit 254
+    fi
+    printf '%s\n' "${FAKE_RESIDUAL_VOLUMES:-None}"
+    ;;
+  *) printf 'unexpected aws command: %s\n' "$*" >&2; exit 97 ;;
 esac
 EOF
 
@@ -79,6 +116,7 @@ cat >"$FAKE_BIN/eksctl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'eksctl %s\n' "$*" >>"$FAKE_CALLS"
+case "${1:-} ${2:-}" in "create cluster"|"delete cluster") ;; *) printf 'unexpected eksctl command\n' >&2; exit 97 ;; esac
 if [[ "${1:-} ${2:-}" == "create cluster" ]]; then
   : >"${FAKE_CLUSTER_MARK}"
 fi
@@ -93,7 +131,9 @@ EOF
 cat >"$FAKE_BIN/helm" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-printf 'helm %s\n' "$*" >>"$FAKE_CALLS"
+printf 'helm %s KUBECONFIG=%s\n' "$*" "${KUBECONFIG:-unset}" >>"$FAKE_CALLS"
+[[ "${KUBECONFIG:-}" == */.twc-lab/kubeconfig ]] || { printf 'unscoped helm command\n' >&2; exit 97; }
+case "${1:-} ${2:-}" in "repo add"|"repo update"|"upgrade --install"|"list --all-namespaces"|"uninstall twc-lab"|"uninstall ingress-nginx") ;; *) printf 'unexpected helm command: %s\n' "$*" >&2; exit 97 ;; esac
 if [[ "${1:-}" == list ]]; then
   printf '%s\n' '[{"name":"ingress-nginx","namespace":"ingress-nginx","status":"deployed"},{"name":"twc-lab","namespace":"twc-lab","status":"deployed"}]'
 fi
@@ -105,26 +145,41 @@ EOF
 cat >"$FAKE_BIN/kubectl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-printf 'kubectl %s\n' "$*" >>"$FAKE_CALLS"
+printf 'kubectl %s KUBECONFIG=%s\n' "$*" "${KUBECONFIG:-unset}" >>"$FAKE_CALLS"
+[[ "${KUBECONFIG:-}" == */.twc-lab/kubeconfig ]] || { printf 'unscoped kubectl command\n' >&2; exit 97; }
+if [[ "$*" == *"rollout status"* && "${FAKE_ROLLOUT_FAIL:-0}" == 1 ]]; then
+  exit 1
+fi
 case "$*" in
   *"get service ingress-nginx-controller"*) printf '%s\n' "${FAKE_NLB_HOST:-lab.example.test}" ;;
   *"get service twc-lab"*) printf '%s\n' "${FAKE_APP_HOST:-lab.example.test}" ;;
   *"get statefulset"*) printf '%s\n' "${FAKE_REPLICAS:-1}" ;;
   *"get pods"*"--output name"*) printf '%s\n' 'pod/twc-lab-simulator-abc' 'pod/twc-lab-artemis-0' ;;
+  *"get persistentvolumeclaims"*"--output json"*)
+    if [[ "${FAKE_PVC_PRESENT:-0}" == 1 ]]; then printf '%s\n' '{"items":[{"spec":{"volumeName":"pv-lab123"}}]}'; else printf '%s\n' '{"items":[]}'; fi
+    ;;
   *"get persistentvolumeclaims"*"--output name"*) printf '%s\n' 'persistentvolumeclaim/data-twc-lab-artemis-0' ;;
+  *"get persistentvolume"*"--output json"*) printf '%s\n' '{"spec":{"csi":{"volumeHandle":"vol-pvc123"}}}' ;;
+  *"get persistentvolume"*"--output name"*) ;;
   *"get --raw"*"api/health"*) printf '%s\n' '{"status":"UP","layers":4}' ;;
+  *"wait "*|*"scale statefulset"*|*"rollout status"*|*"delete service"*) ;;
+  *"delete persistentvolumeclaims"*) : >"${FAKE_PVC_DELETED_MARK}" ;;
+  *) printf 'unexpected kubectl command: %s\n' "$*" >&2; exit 97 ;;
 esac
 EOF
 
 cat >"$FAKE_BIN/openssl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+[[ "$*" == "rand -hex 16" ]] || { printf 'unexpected openssl command\n' >&2; exit 97; }
 printf '0123456789abcdef0123456789abcdef\n'
 EOF
 cat >"$FAKE_BIN/make" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'make %s\n' "$*" >>"$FAKE_CALLS"
+printf 'unexpected make invocation\n' >&2
+exit 97
 EOF
 chmod +x "$FAKE_BIN"/*
 
@@ -147,7 +202,9 @@ ln -s "$FAKE_BIN/aws" "$NO_KUBE_BIN/aws"
 export FAKE_CALLS="$CALLS"
 export FAKE_STACK_MARK="$TEST_ROOT/stack-created"
 export FAKE_CLUSTER_MARK="$TEST_ROOT/cluster-created"
+export FAKE_PVC_DELETED_MARK="$TEST_ROOT/pvc-deleted"
 export PATH="$FAKE_BIN:/usr/bin:/bin"
+export KUBECONFIG="$TEST_ROOT/external-user-context"
 
 pass=0
 fail=0
@@ -165,6 +222,7 @@ new_case() {
   : >"$CALLS"
   rm -f "$FAKE_STACK_MARK"
   rm -f "$FAKE_CLUSTER_MARK"
+  rm -f "$FAKE_PVC_DELETED_MARK"
 }
 
 run_script() {
@@ -229,9 +287,12 @@ ACCOUNT_ID=111122223333
 AWS_REGION=us-east-2
 CLUSTER_NAME=twc-lab
 NETWORK_MODE=$mode
+DEPLOYMENT_ID=0123456789abcdef0123456789abcdef
+CLUSTER_ARN=arn:aws:eks:us-east-2:111122223333:cluster/twc-lab
 VPC_ID=vpc-123456
 SUBNET_IDS=subnet-a,subnet-b
 STACK_NAME=twc-lab-vpc
+VPC_STACK_ID=arn:aws:cloudformation:us-east-2:111122223333:stack/twc-lab-vpc/stack123
 FAILED_SERVICE=
 NLB_HOSTNAME=lab.example.test
 EOF
@@ -271,7 +332,10 @@ new_case
 expect_fail "existing subnets map public IPs" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 SUBNET_IDS=subnet-a,subnet-b $'FAKE_SUBNET_ROWS=subnet-a\tus-east-2a\t32\tFalse\t1\nsubnet-b\tus-east-2b\t32\tTrue\t1'
 
 new_case
-expect_fail "existing VPC has an IGW default route" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 SUBNET_IDS=subnet-a,subnet-b FAKE_DEFAULT_ROUTES=None
+expect_fail "existing VPC has an IGW default route" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 SUBNET_IDS=subnet-a,subnet-b FAKE_SELECTED_ROUTE=None
+
+new_case
+expect_fail "selected subnet cannot borrow an unrelated IGW route" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 SUBNET_IDS=subnet-a,subnet-b FAKE_EXPLICIT_ROUTE_TABLE_ID=rtb-selected FAKE_SELECTED_ROUTE=None FAKE_DEFAULT_ROUTES=igw-unrelated
 
 new_case
 expect_fail "existing subnets carry public ELB role tags" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 SUBNET_IDS=subnet-a,subnet-b $'FAKE_SUBNET_ROWS=subnet-a\tus-east-2a\t32\tTrue\tNone\nsubnet-b\tus-east-2b\t32\tTrue\t1'
@@ -281,10 +345,13 @@ expect_ok "managed deploy succeeds with fake CLIs" run_script deploy.sh CONFIRM=
 assert_order "managed stack precedes cluster creation" "aws cloudformation deploy" "eksctl create cluster"
 assert_order "cluster precedes ingress installation" "eksctl create cluster" "helm upgrade --install ingress-nginx"
 assert_order "ingress precedes app installation" "helm upgrade --install ingress-nginx" "helm upgrade --install twc-lab"
+if grep -Fq -- "--kubeconfig $CASE_DIR/.twc-lab/kubeconfig" "$CALLS" && ! grep -Eq '^(helm|kubectl).*KUBECONFIG=unset$' "$CALLS"; then record "deploy uses only the dedicated lab kubeconfig" pass; else record "deploy uses only the dedicated lab kubeconfig" fail; fi
 if [[ $(file_mode "$CASE_DIR/.twc-lab/state.env") == 600 ]]; then record "state file permissions are 0600" pass; else record "state file permissions are 0600" fail; fi
 if [[ $(file_mode "$CASE_DIR/.twc-lab/secrets.yaml") == 600 ]]; then record "secrets file permissions are 0600" pass; else record "secrets file permissions are 0600" fail; fi
 if grep -Eq '^secrets:$' "$CASE_DIR/.twc-lab/secrets.yaml" && grep -Eq '^  artemisPassword: "[0-9a-f]{32}"$' "$CASE_DIR/.twc-lab/secrets.yaml"; then record "secret uses the chart password key and 32 characters" pass; else record "secret uses the chart password key and 32 characters" fail; fi
-if [[ $(cut -d= -f1 "$CASE_DIR/.twc-lab/state.env" | tr '\n' ' ') == "ACCOUNT_ID AWS_REGION CLUSTER_NAME NETWORK_MODE VPC_ID SUBNET_IDS STACK_NAME FAILED_SERVICE NLB_HOSTNAME " ]]; then record "state contains only fixed keys" pass; else record "state contains only fixed keys" fail; fi
+if [[ $(cut -d= -f1 "$CASE_DIR/.twc-lab/state.env" | tr '\n' ' ') == "ACCOUNT_ID AWS_REGION CLUSTER_NAME NETWORK_MODE DEPLOYMENT_ID CLUSTER_ARN VPC_ID SUBNET_IDS STACK_NAME VPC_STACK_ID FAILED_SERVICE NLB_HOSTNAME " ]]; then record "state contains only fixed keys" pass; else record "state contains only fixed keys" fail; fi
+if grep -q '^DEPLOYMENT_ID=' "$CASE_DIR/.twc-lab/state.env" && grep -q '^CLUSTER_ARN=' "$CASE_DIR/.twc-lab/state.env" && grep -q '^VPC_STACK_ID=' "$CASE_DIR/.twc-lab/state.env"; then record "state records deployment, cluster, and stack identities" pass; else record "state records deployment, cluster, and stack identities" fail; fi
+if grep -Fq 'DeploymentId=0123456789abcdef0123456789abcdef' "$CALLS" && grep -Fq 'twc-lab:deployment-id=0123456789abcdef0123456789abcdef' "$CALLS" && grep -Fq 'aws eks tag-resource' "$CALLS"; then record "deployment identity tags both stack and cluster" pass; else record "deployment identity tags both stack and cluster" fail; fi
 if grep -Fq 'nodePools:' "$CASE_DIR/.twc-lab/cluster.yaml" && grep -Fq 'general-purpose' "$CASE_DIR/.twc-lab/cluster.yaml" && grep -Fq 'system' "$CASE_DIR/.twc-lab/cluster.yaml"; then record "renderer enables both Auto Mode pools" pass; else record "renderer enables both Auto Mode pools" fail; fi
 if grep -Fq 'http://lab.example.test/webapp' "$TEST_ROOT/out" && grep -Fq 'http://lab.example.test/admin' "$TEST_ROOT/out" && grep -Fq 'http://lab.example.test/admin/license' "$TEST_ROOT/out" && ! grep -Fq '/authentication' "$TEST_ROOT/out"; then record "deploy prints the required three URLs" pass; else record "deploy prints the required three URLs" fail; fi
 
@@ -295,7 +362,7 @@ new_case
 expect_fail "preflight rejects a managed stack for another cluster" run_script preflight.sh FAKE_STACK_EXISTS=1 FAKE_STACK_CLUSTER=other-cluster
 
 new_case
-expect_ok "preflight accepts the tagged intended managed stack" run_script preflight.sh FAKE_STACK_EXISTS=1
+expect_fail "preflight rejects even tagged stacks without deployment state" run_script preflight.sh FAKE_STACK_EXISTS=1
 
 new_case
 expect_fail "managed deploy stops when stack lookup is unauthorized" run_script deploy.sh CONFIRM=1 FAKE_STACK_ERROR=AccessDeniedException
@@ -306,6 +373,9 @@ expect_ok "existing deploy succeeds with validated network" run_script deploy.sh
 assert_no_call "existing deploy never mutates CloudFormation" "aws cloudformation deploy"
 expect_ok "existing deploy reuses its recorded state without repeated flags" run_script deploy.sh CONFIRM=1
 assert_no_call "recorded existing mode still never mutates CloudFormation" "aws cloudformation deploy"
+: >"$CALLS"
+expect_fail "tracked deployment rejects conflicting network overrides" run_script deploy.sh NETWORK_MODE=existing VPC_ID=vpc-other SUBNET_IDS=subnet-x,subnet-y CONFIRM=1
+if grep -Fq 'VPC_ID=vpc-123456' "$CASE_DIR/.twc-lab/state.env"; then record "conflicting rerun preserves tracked network identity" pass; else record "conflicting rerun preserves tracked network identity" fail; fi
 
 new_case
 expect_fail "failure demo rejects services outside allowlist" run_script demo-failure.sh SERVICE=postgres CONFIRM=1
@@ -360,6 +430,11 @@ if grep -Fq 'kubectl scale statefulset twc-lab-artemis --replicas=1' "$CALLS" &&
 
 new_case
 write_state managed
+expect_fail "failed rollout still reports the scaled service" run_script demo-failure.sh SERVICE=artemis CONFIRM=1 FAKE_ROLLOUT_FAIL=1
+if grep -Fq 'FAILED_SERVICE=artemis' "$CASE_DIR/.twc-lab/state.env"; then record "failure state is recorded before rollout wait" pass; else record "failure state is recorded before rollout wait" fail; fi
+
+new_case
+write_state managed
 expect_ok "restore is harmless when no failure is recorded" run_script demo-restore.sh PATH="$NO_KUBE_BIN"
 assert_no_call "no-op restore does not scale Kubernetes" "kubectl scale"
 
@@ -369,7 +444,21 @@ expect_ok "managed destroy succeeds" run_script destroy.sh CONFIRM=1
 if grep -Fq 'helm uninstall twc-lab --namespace twc-lab --ignore-not-found' "$CALLS" && grep -Fq 'helm uninstall ingress-nginx --namespace ingress-nginx --ignore-not-found' "$CALLS"; then record "destroy tolerates already-removed Helm releases" pass; else record "destroy tolerates already-removed Helm releases" fail; fi
 assert_order "destroy selects the recorded cluster before Helm mutation" "aws eks update-kubeconfig" "helm uninstall twc-lab"
 assert_order "NLB removal precedes cluster deletion" "kubectl delete service ingress-nginx-controller" "eksctl delete cluster"
+assert_order "label-scoped PVC cleanup precedes cluster deletion" "kubectl delete persistentvolumeclaims --namespace twc-lab --selector app.kubernetes.io/instance=twc-lab" "eksctl delete cluster"
 assert_order "cluster deletion precedes VPC deletion" "eksctl delete cluster" "aws cloudformation delete-stack"
+
+new_case
+write_state managed
+expect_ok "destroy waits through bound PV and EBS cleanup" run_script destroy.sh CONFIRM=1 FAKE_PVC_PRESENT=1
+assert_order "PV lookup precedes cluster deletion" "kubectl get persistentvolume pv-lab123" "eksctl delete cluster"
+assert_order "EBS deletion check precedes cluster deletion" "aws ec2 describe-volumes --region us-east-2 --volume-ids vol-pvc123" "eksctl delete cluster"
+
+new_case
+write_state managed
+expect_fail "storage lookup failure blocks cluster cleanup" run_script destroy.sh CONFIRM=1 FAKE_PVC_PRESENT=1 FAKE_VOLUME_LOOKUP_ERROR=1
+if [[ -f "$CASE_DIR/.twc-lab/state.env" ]]; then record "storage verification failure preserves state" pass; else record "storage verification failure preserves state" fail; fi
+assert_no_call "storage verification failure prevents cluster deletion" "eksctl delete cluster"
+assert_no_call "storage verification failure preserves managed VPC" "aws cloudformation delete-stack"
 
 new_case
 write_state managed
@@ -392,6 +481,7 @@ sed 's/^NLB_HOSTNAME=.*/NLB_HOSTNAME=/' "$CASE_DIR/.twc-lab/state.env" >"$CASE_D
 mv "$CASE_DIR/.twc-lab/state.env.new" "$CASE_DIR/.twc-lab/state.env"
 expect_fail "destroy preserves a newly discovered hostname on cleanup failure" run_script destroy.sh CONFIRM=1 FAKE_NLB_HOST=retry.example.test FAKE_HELM_UNINSTALL_FAIL=1
 if grep -Fq 'NLB_HOSTNAME=retry.example.test' "$CASE_DIR/.twc-lab/state.env"; then record "retry state retains the discovered load balancer" pass; else record "retry state retains the discovered load balancer" fail; fi
+assert_no_call "failed workload uninstall does not delete PVCs" "kubectl delete persistentvolumeclaims"
 
 new_case
 write_state existing
@@ -421,6 +511,48 @@ expect_fail "NLB lookup error blocks cleanup" run_script destroy.sh CONFIRM=1 FA
 if [[ -f "$CASE_DIR/.twc-lab/state.env" ]]; then record "NLB lookup error preserves state" pass; else record "NLB lookup error preserves state" fail; fi
 assert_no_call "NLB lookup error prevents cluster deletion" "eksctl delete cluster"
 assert_no_call "NLB lookup error preserves managed VPC stack" "aws cloudformation delete-stack"
+
+new_case
+expect_fail "zero NLB timeout is rejected" run_script deploy.sh CONFIRM=1 NLB_WAIT_SECONDS=0
+assert_no_call "invalid timeout is rejected before AWS" "aws "
+
+new_case
+expect_fail "failed initial stack creation preserves deployment identity" run_script deploy.sh CONFIRM=1 FAKE_STACK_DEPLOY_FAIL=1
+if grep -q '^DEPLOYMENT_ID=[a-f0-9]\{32\}$' "$CASE_DIR/.twc-lab/state.env"; then record "partial deploy has scoped recovery state" pass; else record "partial deploy has scoped recovery state" fail; fi
+if grep -q '^VPC_STACK_ID=arn:aws:cloudformation:' "$CASE_DIR/.twc-lab/state.env"; then record "failed stack creation records exact stack identity" pass; else record "failed stack creation records exact stack identity" fail; fi
+
+new_case
+expect_fail "failed cluster tagging preserves cluster identity" run_script deploy.sh CONFIRM=1 FAKE_CLUSTER_TAG_FAIL=1
+if grep -q '^CLUSTER_ARN=arn:aws:eks:' "$CASE_DIR/.twc-lab/state.env"; then record "partial cluster deploy records exact ARN" pass; else record "partial cluster deploy records exact ARN" fail; fi
+
+new_case
+expect_ok "deploy creates state for rollback detection" run_script deploy.sh CONFIRM=1
+: >"$CALLS"
+expect_fail "rollback-complete stack is not blindly reused" run_script deploy.sh CONFIRM=1 FAKE_STACK_STATUS=ROLLBACK_COMPLETE
+assert_no_call "rollback stack prevents Helm mutation" "helm upgrade --install"
+
+new_case
+expect_ok "deploy prepares cluster identity" run_script deploy.sh CONFIRM=1
+: >"$CALLS"
+expect_fail "destroy rejects a same-name replacement cluster" run_script destroy.sh CONFIRM=1 FAKE_CLUSTER_ARN=arn:aws:eks:us-east-2:111122223333:cluster/replaced
+assert_no_call "replacement cluster is never mutated" "helm uninstall twc-lab"
+
+new_case
+expect_ok "deploy records stack identity" run_script deploy.sh CONFIRM=1
+: >"$CALLS"
+expect_fail "destroy rejects a replaced same-name stack" run_script destroy.sh CONFIRM=1 FAKE_STACK_ID=arn:aws:cloudformation:us-east-2:111122223333:stack/twc-lab-vpc/replaced
+assert_no_call "replacement stack is never deleted" "aws cloudformation delete-stack"
+
+new_case
+write_state managed
+rm -f "$FAKE_CLUSTER_MARK" "$FAKE_STACK_MARK"
+expect_ok "destroy treats a precisely absent managed stack as success" run_script destroy.sh CONFIRM=1
+
+new_case
+write_state managed
+rm -f "$FAKE_CLUSTER_MARK"
+expect_ok "destroy resumes an in-progress stack deletion" run_script destroy.sh CONFIRM=1 FAKE_STACK_STATUS=DELETE_IN_PROGRESS FAKE_DELETE_STACK_FAIL=1
+assert_no_call "in-progress stack is not deleted twice" "aws cloudformation delete-stack"
 
 printf '%s passed, %s failed\n' "$pass" "$fail"
 (( fail == 0 ))

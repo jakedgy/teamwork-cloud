@@ -7,6 +7,7 @@ readonly LAB_DIR="$PWD/.twc-lab"
 readonly STATE_FILE="$LAB_DIR/state.env"
 readonly CLUSTER_CONFIG="$LAB_DIR/cluster.yaml"
 readonly SECRETS_FILE="$LAB_DIR/secrets.yaml"
+readonly KUBECONFIG_FILE="$LAB_DIR/kubeconfig"
 
 log() { printf '[twc-lab] %s\n' "$*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
@@ -55,12 +56,12 @@ ensure_lab_dir() {
 load_state() {
   [[ -f $STATE_FILE ]] || die "State file not found: $STATE_FILE"
   local key value
-  ACCOUNT_ID= AWS_REGION= CLUSTER_NAME= NETWORK_MODE= VPC_ID= SUBNET_IDS=
-  STACK_NAME= FAILED_SERVICE= NLB_HOSTNAME=
+  ACCOUNT_ID= AWS_REGION= CLUSTER_NAME= NETWORK_MODE= DEPLOYMENT_ID= CLUSTER_ARN=
+  VPC_ID= SUBNET_IDS= STACK_NAME= VPC_STACK_ID= FAILED_SERVICE= NLB_HOSTNAME=
   while IFS='=' read -r key value || [[ -n ${key:-} ]]; do
     [[ -n ${key:-} ]] || continue
     case "$key" in
-      ACCOUNT_ID|AWS_REGION|CLUSTER_NAME|NETWORK_MODE|VPC_ID|SUBNET_IDS|STACK_NAME|FAILED_SERVICE|NLB_HOSTNAME)
+      ACCOUNT_ID|AWS_REGION|CLUSTER_NAME|NETWORK_MODE|DEPLOYMENT_ID|CLUSTER_ARN|VPC_ID|SUBNET_IDS|STACK_NAME|VPC_STACK_ID|FAILED_SERVICE|NLB_HOSTNAME)
         [[ $value != *$'\n'* && $value != *$'\r'* ]] || die "Invalid newline in state value"
         printf -v "$key" '%s' "$value"
         ;;
@@ -72,13 +73,23 @@ load_state() {
   validate_region "$AWS_REGION"
   validate_simple_name CLUSTER_NAME "$CLUSTER_NAME"
   validate_network_mode "$NETWORK_MODE"
-  [[ $VPC_ID =~ ^vpc-[A-Za-z0-9]+$ ]] || die "State contains an invalid VPC ID"
-  split_csv "$SUBNET_IDS"
-  (( ${#CSV_VALUES[@]} >= 2 )) || die "State must contain at least two subnet IDs"
-  local subnet
-  for subnet in "${CSV_VALUES[@]}"; do
-    [[ $subnet =~ ^subnet-[A-Za-z0-9]+$ ]] || die "State contains an invalid subnet ID"
-  done
+  [[ $DEPLOYMENT_ID =~ ^[a-f0-9]{32}$ ]] || die "State contains an invalid deployment ID"
+  [[ -z $CLUSTER_ARN ]] || validate_cluster_arn "$CLUSTER_ARN"
+  [[ -z $VPC_STACK_ID ]] || validate_stack_id "$VPC_STACK_ID"
+  if [[ -n $VPC_ID ]]; then
+    [[ $VPC_ID =~ ^vpc-[A-Za-z0-9]+$ ]] || die "State contains an invalid VPC ID"
+  fi
+  if [[ -n $SUBNET_IDS ]]; then
+    split_csv "$SUBNET_IDS"
+    (( ${#CSV_VALUES[@]} >= 2 )) || die "State must contain at least two subnet IDs"
+    local subnet
+    for subnet in "${CSV_VALUES[@]}"; do
+      [[ $subnet =~ ^subnet-[A-Za-z0-9]+$ ]] || die "State contains an invalid subnet ID"
+    done
+  fi
+  if [[ $NETWORK_MODE == existing ]]; then
+    [[ -n $VPC_ID && -n $SUBNET_IDS ]] || die "Existing-network state is incomplete"
+  fi
   case "$FAILED_SERVICE" in
     ''|cassandra|zookeeper|artemis) ;;
     *) die "State contains an invalid failed service" ;;
@@ -98,14 +109,65 @@ write_state() {
     printf 'AWS_REGION=%s\n' "$AWS_REGION"
     printf 'CLUSTER_NAME=%s\n' "$CLUSTER_NAME"
     printf 'NETWORK_MODE=%s\n' "$NETWORK_MODE"
+    printf 'DEPLOYMENT_ID=%s\n' "$DEPLOYMENT_ID"
+    printf 'CLUSTER_ARN=%s\n' "${CLUSTER_ARN:-}"
     printf 'VPC_ID=%s\n' "${VPC_ID:-}"
     printf 'SUBNET_IDS=%s\n' "${SUBNET_IDS:-}"
     printf 'STACK_NAME=%s\n' "${STACK_NAME:-}"
+    printf 'VPC_STACK_ID=%s\n' "${VPC_STACK_ID:-}"
     printf 'FAILED_SERVICE=%s\n' "${FAILED_SERVICE:-}"
     printf 'NLB_HOSTNAME=%s\n' "${NLB_HOSTNAME:-}"
   } >"$tmp"
   chmod 600 "$tmp"
   mv -f "$tmp" "$STATE_FILE"
+}
+
+validate_cluster_arn() {
+  [[ $1 =~ ^arn:aws[a-zA-Z-]*:eks:[a-z0-9-]+:[0-9]{12}:cluster/[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "Invalid EKS cluster ARN"
+}
+
+validate_stack_id() {
+  [[ $1 =~ ^arn:aws[a-zA-Z-]*:cloudformation:[a-z0-9-]+:[0-9]{12}:stack/[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9-]+$ ]] || die "Invalid CloudFormation stack ID"
+}
+
+validate_positive_bounded() {
+  local label=$1 value=$2 maximum=$3
+  [[ $value =~ ^[0-9]+$ ]] && (( value > 0 && value <= maximum )) || die "$label must be an integer from 1 to $maximum"
+}
+
+configure_timeouts() {
+  NLB_WAIT_SECONDS=${NLB_WAIT_SECONDS:-900}
+  STORAGE_WAIT_SECONDS=${STORAGE_WAIT_SECONDS:-900}
+  POLL_SECONDS=${POLL_SECONDS:-10}
+  validate_positive_bounded NLB_WAIT_SECONDS "$NLB_WAIT_SECONDS" 3600
+  validate_positive_bounded STORAGE_WAIT_SECONDS "$STORAGE_WAIT_SECONDS" 3600
+  validate_positive_bounded POLL_SECONDS "$POLL_SECONDS" 60
+}
+
+lab_kubectl() { KUBECONFIG="$KUBECONFIG_FILE" kubectl "$@"; }
+lab_helm() { KUBECONFIG="$KUBECONFIG_FILE" helm "$@"; }
+
+verify_cluster_identity() {
+  [[ -n $CLUSTER_ARN ]] || die "State has no cluster ARN; refusing Kubernetes mutation"
+  local actual_arn actual_deployment_id
+  actual_arn=$(aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" --query 'cluster.arn' --output text)
+  validate_cluster_arn "$actual_arn"
+  [[ $actual_arn == "$CLUSTER_ARN" ]] || die "Cluster ARN mismatch; refusing same-name replacement"
+  actual_deployment_id=$(aws eks list-tags-for-resource --resource-arn "$actual_arn" --region "$AWS_REGION" --query 'tags."twc-lab:deployment-id"' --output text)
+  [[ $actual_deployment_id == "$DEPLOYMENT_ID" ]] || die "Cluster deployment tag mismatch"
+}
+
+verify_stack_identity() {
+  [[ -n $VPC_STACK_ID ]] || die "State has no stack ID; refusing stack mutation"
+  local actual_id actual_cluster parameter_deployment tag_deployment
+  actual_id=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" --query 'Stacks[0].StackId' --output text)
+  validate_stack_id "$actual_id"
+  [[ $actual_id == "$VPC_STACK_ID" ]] || die "Stack ID mismatch; refusing same-name replacement"
+  actual_cluster=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" --query "Stacks[0].Parameters[?ParameterKey=='ClusterName'].ParameterValue | [0]" --output text)
+  parameter_deployment=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" --query "Stacks[0].Parameters[?ParameterKey=='DeploymentId'].ParameterValue | [0]" --output text)
+  tag_deployment=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" --query "Stacks[0].Tags[?Key=='twc-lab:deployment-id'].Value | [0]" --output text)
+  [[ $actual_cluster == "$CLUSTER_NAME" ]] || die "Stack cluster parameter mismatch"
+  [[ $parameter_deployment == "$DEPLOYMENT_ID" && $tag_deployment == "$DEPLOYMENT_ID" ]] || die "Stack deployment identity mismatch"
 }
 
 confirm_action() {

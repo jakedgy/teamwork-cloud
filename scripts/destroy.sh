@@ -3,7 +3,8 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 enable_diagnostics
-require_commands aws eksctl kubectl helm
+configure_timeouts
+require_commands aws eksctl helm jq kubectl
 load_state
 verify_current_account
 confirm_action "destroy cluster $CLUSTER_NAME" "$CLUSTER_NAME"
@@ -19,33 +20,80 @@ elif ! grep -q 'ResourceNotFoundException' "$cluster_error"; then
 fi
 rm -f -- "$cluster_error"
 
+pv_names=
+volume_ids=
 if (( cluster_exists == 1 )); then
-  aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION"
-  discovered_hostname=$(kubectl get service ingress-nginx-controller --namespace ingress-nginx --output 'jsonpath={.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
-  if [[ -n $discovered_hostname ]]; then
-    NLB_HOSTNAME=$discovered_hostname
-    write_state
+  verify_cluster_identity
+  aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION" --kubeconfig "$KUBECONFIG_FILE"
+  chmod 600 "$KUBECONFIG_FILE"
+
+  pvc_json=$(lab_kubectl get persistentvolumeclaims --namespace twc-lab --selector 'app.kubernetes.io/instance=twc-lab' --output json)
+  pv_names=$(printf '%s' "$pvc_json" | jq -r '.items[]?.spec.volumeName // empty')
+  while IFS= read -r pv_name; do
+    [[ -n $pv_name ]] || continue
+    pv_json=$(lab_kubectl get persistentvolume "$pv_name" --output json)
+    volume_id=$(printf '%s' "$pv_json" | jq -r '.spec.csi.volumeHandle // empty')
+    [[ -n $volume_id ]] && volume_ids="${volume_ids}${volume_ids:+$'\n'}${volume_id}"
+  done <<<"$pv_names"
+
+  verify_cluster_identity
+  workloads_removed=1
+  lab_helm uninstall twc-lab --namespace twc-lab --ignore-not-found --wait --timeout 15m >/dev/null 2>&1 || { failed=1; workloads_removed=0; }
+  if (( workloads_removed == 1 )); then
+    verify_cluster_identity
+    lab_kubectl delete persistentvolumeclaims --namespace twc-lab --selector 'app.kubernetes.io/instance=twc-lab' --ignore-not-found=true --wait=true --timeout=15m >/dev/null 2>&1 || failed=1
+
+    storage_deadline=$((SECONDS + STORAGE_WAIT_SECONDS))
+    while IFS= read -r pv_name; do
+      [[ -n $pv_name ]] || continue
+      while :; do
+        remaining_pv=$(lab_kubectl get persistentvolume "$pv_name" --ignore-not-found=true --output name)
+        [[ -z $remaining_pv ]] && break
+        (( SECONDS >= storage_deadline )) && { failed=1; break; }
+        sleep "$POLL_SECONDS"
+      done
+    done <<<"$pv_names"
+    while IFS= read -r volume_id; do
+      [[ -n $volume_id ]] || continue
+      while :; do
+        if volume_result=$(aws ec2 describe-volumes --region "$AWS_REGION" --volume-ids "$volume_id" --query 'Volumes[].VolumeId' --output text 2>&1); then
+          [[ -z $volume_result || $volume_result == None ]] && break
+        elif [[ $volume_result == *InvalidVolume.NotFound* ]]; then
+          break
+        else
+          log "Unable to verify deletion of EBS volume $volume_id"
+          failed=1
+          break
+        fi
+        (( SECONDS >= storage_deadline )) && { failed=1; break; }
+        sleep "$POLL_SECONDS"
+      done
+    done <<<"$volume_ids"
   fi
-  helm uninstall twc-lab --namespace twc-lab --ignore-not-found --wait --timeout 15m >/dev/null 2>&1 || failed=1
-  kubectl delete service ingress-nginx-controller --namespace ingress-nginx --ignore-not-found=true >/dev/null 2>&1 || failed=1
-  helm uninstall ingress-nginx --namespace ingress-nginx --ignore-not-found --wait --timeout 15m >/dev/null 2>&1 || failed=1
+
+  verify_cluster_identity
+  discovered_hostname=$(lab_kubectl get service ingress-nginx-controller --namespace ingress-nginx --output 'jsonpath={.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+  if [[ -n $discovered_hostname ]]; then NLB_HOSTNAME=$discovered_hostname; write_state; fi
+  verify_cluster_identity
+  lab_kubectl delete service ingress-nginx-controller --namespace ingress-nginx --ignore-not-found=true >/dev/null 2>&1 || failed=1
+  verify_cluster_identity
+  lab_helm uninstall ingress-nginx --namespace ingress-nginx --ignore-not-found --wait --timeout 15m >/dev/null 2>&1 || failed=1
 fi
 
 if [[ -n $NLB_HOSTNAME ]]; then
-  nlb_deadline=$((SECONDS + ${NLB_WAIT_SECONDS:-900}))
-  while (( SECONDS < nlb_deadline )); do
+  nlb_deadline=$((SECONDS + NLB_WAIT_SECONDS))
+  while :; do
     if ! nlb_arns=$(aws elbv2 describe-load-balancers --region "$AWS_REGION" --query "LoadBalancers[?DNSName=='$NLB_HOSTNAME'].LoadBalancerArn" --output text); then
-      log "Unable to confirm deletion of ingress load balancer $NLB_HOSTNAME"
-      failed=1
-      break
+      log "Unable to confirm deletion of ingress load balancer $NLB_HOSTNAME"; failed=1; break
     fi
     [[ -z $nlb_arns || $nlb_arns == None ]] && break
-    sleep "${POLL_SECONDS:-10}"
+    (( SECONDS >= nlb_deadline )) && { failed=1; break; }
+    sleep "$POLL_SECONDS"
   done
-  [[ -z ${nlb_arns:-} || ${nlb_arns:-} == None ]] || failed=1
 fi
 
 if (( failed == 0 && cluster_exists == 1 )); then
+  verify_cluster_identity
   eksctl delete cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" --wait || failed=1
 fi
 
@@ -56,9 +104,7 @@ if (( failed == 0 )); then
     read -r -a elb_arns <<<"$all_elb_arns"
     for elb_arn in "${elb_arns[@]}"; do
       tagged_arn=$(aws elbv2 describe-tags --region "$AWS_REGION" --resource-arns "$elb_arn" --query "TagDescriptions[?Tags[?Key=='eks:eks-cluster-name' && Value=='$CLUSTER_NAME']].ResourceArn" --output text)
-      if [[ -n $tagged_arn && $tagged_arn != None ]]; then
-        residual_elbs="${residual_elbs}${residual_elbs:+,}${tagged_arn}"
-      fi
+      [[ -z $tagged_arn || $tagged_arn == None ]] || residual_elbs="${residual_elbs}${residual_elbs:+,}${tagged_arn}"
     done
   fi
   residual_volumes=$(aws ec2 describe-volumes --region "$AWS_REGION" --filters "Name=tag:eks:eks-cluster-name,Values=$CLUSTER_NAME" --query 'Volumes[].VolumeId' --output text)
@@ -67,18 +113,19 @@ if (( failed == 0 )); then
 fi
 
 if (( failed == 0 )) && [[ $NETWORK_MODE == managed ]]; then
-  [[ -n $STACK_NAME ]] || die "Managed state has no stack name"
-  owner_tag=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" --query "Stacks[0].Tags[?Key=='twc-lab:managed'].Value | [0]" --output text)
-  [[ $owner_tag == true ]] || die "Refusing to delete untagged stack $STACK_NAME"
-  aws cloudformation delete-stack --stack-name "$STACK_NAME" --region "$AWS_REGION" || failed=1
-  if (( failed == 0 )); then
-    aws cloudformation wait stack-delete-complete --stack-name "$STACK_NAME" --region "$AWS_REGION" || failed=1
+  if stack_status=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" --query 'Stacks[0].StackStatus' --output text 2>&1); then
+    verify_stack_identity
+    if [[ $stack_status != DELETE_IN_PROGRESS ]]; then
+      aws cloudformation delete-stack --stack-name "$STACK_NAME" --region "$AWS_REGION"
+    fi
+    if ! aws cloudformation wait stack-delete-complete --stack-name "$STACK_NAME" --region "$AWS_REGION"; then failed=1; fi
+  elif [[ $stack_status == *ValidationError* && $stack_status == *"does not exist"* ]]; then
+    log "Managed stack is already absent"
+  else
+    die "Unable to verify whether managed stack $STACK_NAME exists"
   fi
 fi
 
-if (( failed != 0 )); then
-  die "Cleanup was incomplete; state remains at $STATE_FILE"
-fi
-
-rm -f -- "$STATE_FILE" "$CLUSTER_CONFIG" "$SECRETS_FILE"
+(( failed == 0 )) || die "Cleanup was incomplete; state remains at $STATE_FILE"
+rm -f -- "$STATE_FILE" "$CLUSTER_CONFIG" "$SECRETS_FILE" "$KUBECONFIG_FILE"
 log "Cluster cleanup complete"

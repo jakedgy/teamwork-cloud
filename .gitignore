@@ -2,4 +2,4 @@
 .superpowers/
 /.twc-lab/
 coverage.out
-/*.local.yaml
+*.local.yaml

@@ -1,0 +1,19 @@
+{{define "content"}}
+<section class="hero">
+  <p class="eyebrow">Simulated product layer</p>
+  <h1>Explore the deployment shape without proprietary software</h1>
+  <p>This lab demonstrates request flow, service discovery, dependency health, and operational failure recovery on Amazon EKS.</p>
+  <div class="actions">
+    <a class="button" href="/authentication">Continue to authentication</a>
+    <a class="button secondary" href="/admin">View service health</a>
+  </div>
+</section>
+<section aria-labelledby="layers-heading">
+  <h2 id="layers-heading">What is running</h2>
+  <div class="card-grid">
+    <article class="card service-card"><h3>Real dependency services</h3><p>Cassandra, ZooKeeper, and Artemis run their native protocols.</p></article>
+    <article class="card boundary-card"><h3>Simulator boundary</h3><p>The product, authentication, administration, and licensing screens are educational simulations.</p></article>
+  </div>
+</section>
+{{end}}
+{{template "layout" .}}

@@ -1,0 +1,30 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{.Title}} · TWC Deployment Lab</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body data-page="{{.Active}}">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div>
+      <p class="eyebrow">EKS deployment lab</p>
+      <p class="brand">Teamwork Cloud-shaped environment</p>
+    </div>
+    <span class="boundary">Simulated product layer</span>
+  </header>
+  <nav aria-label="Primary navigation">
+    <a href="/webapp">Overview</a>
+    <a href="/authentication">Authentication</a>
+    <a href="/admin">Administration</a>
+    <a href="/admin/license">License</a>
+  </nav>
+  <main id="main">{{template "content" .}}</main>
+  <footer>
+    <p>Public, read-only training environment. Do not enter credentials or real data.</p>
+  </footer>
+</body>
+</html>{{end}}

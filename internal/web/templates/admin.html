@@ -1,0 +1,21 @@
+{{define "content"}}
+<section class="hero compact">
+  <p class="eyebrow">Simulated product layer</p>
+  <h1>Administration overview</h1>
+  <p>Observe real protocol health without changing the cluster from this interface.</p>
+</section>
+<section class="context" aria-labelledby="context-heading">
+  <h2 id="context-heading">Cluster context</h2>
+  <dl><div><dt>Cluster</dt><dd>{{.Metadata.ClusterName}}</dd></div><div><dt>AWS Region</dt><dd>{{.Metadata.AWSRegion}}</dd></div></dl>
+</section>
+<section aria-labelledby="services-heading">
+  <div class="section-heading"><div><p class="eyebrow">Live protocol checks</p><h2 id="services-heading">Dependency services</h2></div><p id="health-updated" role="status" aria-live="polite">Loading health…</p></div>
+  <div id="health-grid" class="card-grid" aria-live="polite"></div>
+</section>
+<section aria-labelledby="flow-heading">
+  <h2 id="flow-heading">Request flow</h2>
+  <p class="flow">Browser → public load balancer → ingress → simulator → service protocol checks</p>
+  <p>Use the repository’s demo-failure and demo-restore commands to observe state changes here.</p>
+</section>
+{{end}}
+{{template "layout" .}}

@@ -4,7 +4,8 @@ set -euo pipefail
 chart_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 rendered="$(mktemp)"
 missing_password_output="$(mktemp)"
-trap 'rm -f "$rendered" "$missing_password_output"' EXIT
+mutated="$(mktemp)"
+trap 'rm -f "$rendered" "$missing_password_output" "$mutated"' EXIT
 
 fail() {
   printf 'FAIL: %s\n' "$1" >&2
@@ -26,17 +27,108 @@ assert_count() {
   [[ "$actual" == "$expected" ]] || fail "$description (expected $expected, got $actual)"
 }
 
+resource_exists() {
+  local manifest="$1"
+  local expected_kind="$2"
+  local expected_name="$3"
+  local expected_type="${4:-}"
+
+  awk \
+    -v expected_kind="$expected_kind" \
+    -v expected_name="$expected_name" \
+    -v expected_type="$expected_type" '
+      function matches_resource() {
+        return kind == expected_kind && name == expected_name && \
+          (expected_type == "" || type == expected_type)
+      }
+      function finish_document() {
+        if (matches_resource()) {
+          found = 1
+        }
+        kind = ""
+        name = ""
+        type = ""
+        in_metadata = 0
+        in_spec = 0
+      }
+      /^---[[:space:]]*$/ {
+        finish_document()
+        next
+      }
+      /^kind:[[:space:]]*/ {
+        kind = $0
+        sub(/^kind:[[:space:]]*/, "", kind)
+        next
+      }
+      /^metadata:[[:space:]]*$/ {
+        in_metadata = 1
+        in_spec = 0
+        next
+      }
+      /^spec:[[:space:]]*$/ {
+        in_metadata = 0
+        in_spec = 1
+        next
+      }
+      /^[^[:space:]]/ {
+        in_metadata = 0
+        in_spec = 0
+      }
+      in_metadata && /^  name:[[:space:]]*/ {
+        name = $0
+        sub(/^  name:[[:space:]]*/, "", name)
+        next
+      }
+      in_spec && /^  type:[[:space:]]*/ {
+        type = $0
+        sub(/^  type:[[:space:]]*/, "", type)
+      }
+      END {
+        finish_document()
+        exit !found
+      }
+    ' "$manifest"
+}
+
+assert_resource() {
+  local manifest="$1"
+  local kind="$2"
+  local name="$3"
+  local type="${4:-}"
+  local description="$5"
+
+  resource_exists "$manifest" "$kind" "$name" "$type" || fail "$description"
+}
+
 helm lint "$chart_dir" --set-string secrets.artemisPassword=test-password
 helm template twc-lab "$chart_dir" \
   --set-string secrets.artemisPassword=test-password >"$rendered"
 
 assert_count 3 '^kind: StatefulSet$' 'render exactly three StatefulSets'
-assert_contains '^  name: twc-lab-cassandra$' 'render cassandra StatefulSet'
-assert_contains '^  name: twc-lab-zookeeper$' 'render zookeeper StatefulSet'
-assert_contains '^  name: twc-lab-artemis$' 'render artemis StatefulSet'
+assert_resource "$rendered" StatefulSet twc-lab-cassandra '' 'render cassandra StatefulSet'
+assert_resource "$rendered" StatefulSet twc-lab-zookeeper '' 'render zookeeper StatefulSet'
+assert_resource "$rendered" StatefulSet twc-lab-artemis '' 'render artemis StatefulSet'
 assert_count 1 '^kind: Deployment$' 'render exactly one Deployment'
-assert_contains '^  name: twc-lab-simulator$' 'render simulator workload and Service'
-assert_contains '^  type: ClusterIP$' 'make simulator Service a ClusterIP'
+assert_resource "$rendered" Deployment twc-lab-simulator '' 'render simulator Deployment'
+assert_resource "$rendered" Service twc-lab-simulator ClusterIP \
+  'render simulator ClusterIP Service'
+
+sed 's/^kind: StatefulSet$/kind: DaemonSet/' "$rendered" >"$mutated"
+if resource_exists "$mutated" StatefulSet twc-lab-cassandra; then
+  fail 'StatefulSet assertion accepted a matching name from another document'
+fi
+sed 's/^kind: Deployment$/kind: ReplicaSet/' "$rendered" >"$mutated"
+if resource_exists "$mutated" Deployment twc-lab-simulator; then
+  fail 'Deployment assertion accepted the simulator Service document'
+fi
+sed 's/^kind: Service$/kind: ConfigMap/' "$rendered" >"$mutated"
+if resource_exists "$mutated" Service twc-lab-simulator ClusterIP; then
+  fail 'Service assertion accepted the simulator Deployment document'
+fi
+sed 's/^  type: ClusterIP$/  type: NodePort/' "$rendered" >"$mutated"
+if resource_exists "$mutated" Service twc-lab-simulator ClusterIP; then
+  fail 'simulator Service assertion accepted a non-ClusterIP type'
+fi
 
 assert_count 3 '^        storageClassName: auto-ebs$' 'use auto-ebs for every StatefulSet claim'
 assert_count 1 '^            storage: 8Gi$' 'request one 8Gi volume'

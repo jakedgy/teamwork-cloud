@@ -2,6 +2,7 @@ package health
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -13,12 +14,28 @@ type fakeChecker struct {
 	endpoint string
 	delay    time.Duration
 	err      error
+	started  chan<- struct{}
+	release  <-chan struct{}
 }
 
 func (c fakeChecker) Name() string     { return c.name }
 func (c fakeChecker) Endpoint() string { return c.endpoint }
 
 func (c fakeChecker) Check(ctx context.Context) error {
+	if c.started != nil {
+		select {
+		case c.started <- struct{}{}:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	if c.release != nil {
+		select {
+		case <-c.release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	if c.delay > 0 {
 		select {
 		case <-time.After(c.delay):
@@ -29,21 +46,41 @@ func (c fakeChecker) Check(ctx context.Context) error {
 	return c.err
 }
 
-func TestMonitorCheckNowRunsChecksConcurrently(t *testing.T) {
-	monitor := NewMonitor([]Checker{
-		fakeChecker{name: "cassandra", endpoint: "cassandra:9042", delay: 80 * time.Millisecond},
-		fakeChecker{name: "zookeeper", endpoint: "zookeeper:2181", delay: 80 * time.Millisecond},
-	}, time.Second)
-
-	started := time.Now()
-	monitor.CheckNow(context.Background())
-	if elapsed := time.Since(started); elapsed >= 140*time.Millisecond {
-		t.Fatalf("CheckNow took %s; checks did not complete concurrently", elapsed)
+func newMonitor(t *testing.T, checkers []Checker, timeout time.Duration) *Monitor {
+	t.Helper()
+	monitor, err := NewMonitor(checkers, timeout)
+	if err != nil {
+		t.Fatalf("NewMonitor() error = %v", err)
 	}
+	return monitor
+}
+
+func TestMonitorCheckNowRunsChecksConcurrently(t *testing.T) {
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	monitor := newMonitor(t, []Checker{
+		fakeChecker{name: "cassandra", endpoint: "cassandra:9042", started: started, release: release},
+		fakeChecker{name: "zookeeper", endpoint: "zookeeper:2181", started: started, release: release},
+	}, time.Second)
+	done := make(chan struct{})
+	go func() {
+		monitor.CheckNow(context.Background())
+		close(done)
+	}()
+
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("checks did not both start before either was released")
+		}
+	}
+	close(release)
+	<-done
 }
 
 func TestMonitorCheckNowMarksSuccessfulChecksReady(t *testing.T) {
-	monitor := NewMonitor([]Checker{
+	monitor := newMonitor(t, []Checker{
 		fakeChecker{name: "cassandra", endpoint: "cassandra:9042"},
 	}, time.Second)
 
@@ -64,7 +101,7 @@ func TestMonitorCheckNowMarksSuccessfulChecksReady(t *testing.T) {
 }
 
 func TestMonitorCheckNowMarksFailedChecksUnavailable(t *testing.T) {
-	monitor := NewMonitor([]Checker{
+	monitor := newMonitor(t, []Checker{
 		fakeChecker{name: "artemis", endpoint: "artemis:61616", err: errors.New("broker refused connection")},
 	}, time.Second)
 
@@ -73,8 +110,8 @@ func TestMonitorCheckNowMarksFailedChecksUnavailable(t *testing.T) {
 	if result.Status != StatusUnavailable {
 		t.Fatalf("Status = %q, want %q", result.Status, StatusUnavailable)
 	}
-	if result.Error != "broker refused connection" {
-		t.Fatalf("Error = %q, want check error", result.Error)
+	if result.Error != "check failed" {
+		t.Fatalf("Error = %q, want generic failure", result.Error)
 	}
 	if !result.LastSuccessAt.IsZero() {
 		t.Fatalf("LastSuccessAt = %s, want zero", result.LastSuccessAt)
@@ -82,7 +119,7 @@ func TestMonitorCheckNowMarksFailedChecksUnavailable(t *testing.T) {
 }
 
 func TestMonitorCheckNowReportsTimeout(t *testing.T) {
-	monitor := NewMonitor([]Checker{
+	monitor := newMonitor(t, []Checker{
 		fakeChecker{name: "zookeeper", endpoint: "zookeeper:2181", delay: 100 * time.Millisecond},
 	}, 10*time.Millisecond)
 
@@ -98,7 +135,7 @@ func TestMonitorCheckNowReportsTimeout(t *testing.T) {
 
 func TestMonitorCheckNowPreservesLastSuccessAfterFailure(t *testing.T) {
 	checker := &fakeChecker{name: "cassandra", endpoint: "cassandra:9042"}
-	monitor := NewMonitor([]Checker{checker}, time.Second)
+	monitor := newMonitor(t, []Checker{checker}, time.Second)
 
 	monitor.CheckNow(context.Background())
 	lastSuccess := monitor.Snapshot()[0].LastSuccessAt
@@ -115,7 +152,7 @@ func TestMonitorCheckNowPreservesLastSuccessAfterFailure(t *testing.T) {
 }
 
 func TestMonitorSnapshotReturnsNameSortedDefensiveCopy(t *testing.T) {
-	monitor := NewMonitor([]Checker{
+	monitor := newMonitor(t, []Checker{
 		fakeChecker{name: "zookeeper", endpoint: "zookeeper:2181"},
 		fakeChecker{name: "artemis", endpoint: "artemis:61616"},
 		fakeChecker{name: "cassandra", endpoint: "cassandra:9042"},
@@ -134,18 +171,19 @@ func TestMonitorSnapshotReturnsNameSortedDefensiveCopy(t *testing.T) {
 	}
 }
 
-func TestMonitorCheckNowLimitsErrorsToPrintableCharacters(t *testing.T) {
-	monitor := NewMonitor([]Checker{
-		fakeChecker{name: "artemis", endpoint: "artemis:61616", err: errors.New(strings.Repeat("x", 200) + "\nsecret")},
+func TestMonitorCheckNowDoesNotExposeCheckerErrorText(t *testing.T) {
+	secret := "password=correct-horse token=abc123\n" + strings.Repeat("x", 200)
+	monitor := newMonitor(t, []Checker{
+		fakeChecker{name: "artemis", endpoint: "artemis:61616", err: errors.New(secret)},
 	}, time.Second)
 
 	monitor.CheckNow(context.Background())
 	result := monitor.Snapshot()[0]
-	if len([]rune(result.Error)) != 160 {
-		t.Fatalf("Error length = %d, want 160", len([]rune(result.Error)))
+	if result.Error != "check failed" {
+		t.Fatalf("Error = %q, want generic failure", result.Error)
 	}
-	if strings.ContainsAny(result.Error, "\n\r\t") {
-		t.Fatalf("Error contains non-printable characters: %q", result.Error)
+	if strings.Contains(result.Error, "password") || strings.Contains(result.Error, "abc123") {
+		t.Fatalf("Error exposed checker secret: %q", result.Error)
 	}
 }
 
@@ -162,7 +200,7 @@ func (c recordingChecker) Check(context.Context) error {
 
 func TestMonitorRunChecksImmediatelyAndOnEachTick(t *testing.T) {
 	checks := make(chan struct{}, 2)
-	monitor := NewMonitor([]Checker{recordingChecker{checks: checks}}, time.Second)
+	monitor := newMonitor(t, []Checker{recordingChecker{checks: checks}}, time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -182,5 +220,66 @@ func TestMonitorRunChecksImmediatelyAndOnEachTick(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("Run did not stop after context cancellation")
+	}
+}
+
+func TestResultJSONOmitsZeroLastSuccessAt(t *testing.T) {
+	monitor := newMonitor(t, []Checker{fakeChecker{name: "cassandra", endpoint: "cassandra:9042"}}, time.Second)
+	assertLastSuccessAtOmitted(t, monitor.Snapshot()[0])
+
+	failed := newMonitor(t, []Checker{fakeChecker{name: "artemis", endpoint: "artemis:61616", err: errors.New("failed")}}, time.Second)
+	failed.CheckNow(context.Background())
+	assertLastSuccessAtOmitted(t, failed.Snapshot()[0])
+}
+
+func TestResultJSONIncludesLastSuccessAtAfterSuccess(t *testing.T) {
+	monitor := newMonitor(t, []Checker{fakeChecker{name: "cassandra", endpoint: "cassandra:9042"}}, time.Second)
+	monitor.CheckNow(context.Background())
+
+	encoded, err := json.Marshal(monitor.Snapshot()[0])
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	var value map[string]any
+	if err := json.Unmarshal(encoded, &value); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if _, ok := value["lastSuccessAt"]; !ok {
+		t.Fatalf("JSON = %s, missing lastSuccessAt after successful check", encoded)
+	}
+}
+
+func assertLastSuccessAtOmitted(t *testing.T, result Result) {
+	t.Helper()
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	var value map[string]any
+	if err := json.Unmarshal(encoded, &value); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if _, ok := value["lastSuccessAt"]; ok {
+		t.Fatalf("JSON = %s, unexpectedly contains zero lastSuccessAt", encoded)
+	}
+}
+
+func TestNewMonitorRejectsInvalidConfiguration(t *testing.T) {
+	tests := []struct {
+		name     string
+		checkers []Checker
+		timeout  time.Duration
+	}{
+		{name: "empty checker name", checkers: []Checker{fakeChecker{endpoint: "cassandra:9042"}}, timeout: time.Second},
+		{name: "duplicate checker name", checkers: []Checker{fakeChecker{name: "cassandra"}, fakeChecker{name: "cassandra"}}, timeout: time.Second},
+		{name: "zero timeout", checkers: []Checker{fakeChecker{name: "cassandra"}}, timeout: 0},
+		{name: "negative timeout", checkers: []Checker{fakeChecker{name: "cassandra"}}, timeout: -time.Second},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if monitor, err := NewMonitor(test.checkers, test.timeout); err == nil || monitor != nil {
+				t.Fatalf("NewMonitor() = %v, %v; want nil monitor and error", monitor, err)
+			}
+		})
 	}
 }

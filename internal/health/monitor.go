@@ -3,36 +3,60 @@ package health
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
-	"unicode"
 )
 
 // Monitor aggregates the health of a fixed set of dependency checkers.
 type Monitor struct {
-	checkers []Checker
+	checkers []monitorChecker
 	timeout  time.Duration
 
 	mu      sync.RWMutex
 	results map[string]Result
 }
 
+type monitorChecker struct {
+	checker Checker
+	name    string
+}
+
 // NewMonitor creates a monitor with each dependency in its starting state.
-func NewMonitor(checkers []Checker, timeout time.Duration) *Monitor {
+func NewMonitor(checkers []Checker, timeout time.Duration) (*Monitor, error) {
+	if timeout <= 0 {
+		return nil, errors.New("health check timeout must be positive")
+	}
+
 	monitor := &Monitor{
-		checkers: append([]Checker(nil), checkers...),
-		timeout:  timeout,
-		results:  make(map[string]Result, len(checkers)),
+		timeout: timeout,
+		results: make(map[string]Result, len(checkers)),
 	}
 	for _, checker := range checkers {
-		monitor.results[checker.Name()] = Result{
-			Name:     checker.Name(),
-			Endpoint: checker.Endpoint(),
+		if checker == nil {
+			return nil, errors.New("health checker must not be nil")
+		}
+		name := checker.Name()
+		if strings.TrimSpace(name) == "" {
+			return nil, errors.New("health checker name must not be empty")
+		}
+		if _, exists := monitor.results[name]; exists {
+			return nil, fmt.Errorf("duplicate health checker name %q", name)
+		}
+		endpoint := checker.Endpoint()
+		monitor.checkers = append(monitor.checkers, monitorChecker{
+			checker: checker,
+			name:    name,
+		})
+		monitor.results[name] = Result{
+			Name:     name,
+			Endpoint: endpoint,
 			Status:   StatusStarting,
 		}
 	}
-	return monitor
+	return monitor, nil
 }
 
 // CheckNow runs all dependency checks concurrently and records their outcomes.
@@ -40,13 +64,13 @@ func (m *Monitor) CheckNow(ctx context.Context) {
 	var checks sync.WaitGroup
 	checks.Add(len(m.checkers))
 	for _, checker := range m.checkers {
-		go func(checker Checker) {
+		go func(checker monitorChecker) {
 			defer checks.Done()
 
 			checkContext, cancel := context.WithTimeout(ctx, m.timeout)
 			defer cancel()
 			started := time.Now()
-			err := checker.Check(checkContext)
+			err := checker.checker.Check(checkContext)
 			checkedAt := time.Now()
 
 			m.record(checker, checkedAt, time.Since(started), err)
@@ -55,11 +79,11 @@ func (m *Monitor) CheckNow(ctx context.Context) {
 	checks.Wait()
 }
 
-func (m *Monitor) record(checker Checker, checkedAt time.Time, latency time.Duration, err error) {
+func (m *Monitor) record(checker monitorChecker, checkedAt time.Time, latency time.Duration, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	result := m.results[checker.Name()]
+	result := m.results[checker.name]
 	result.CheckedAt = checkedAt
 	result.LatencyMillis = latency.Milliseconds()
 	if err == nil {
@@ -70,11 +94,13 @@ func (m *Monitor) record(checker Checker, checkedAt time.Time, latency time.Dura
 		result.Status = StatusUnavailable
 		if errors.Is(err, context.DeadlineExceeded) {
 			result.Error = "check timed out"
+		} else if errors.Is(err, context.Canceled) {
+			result.Error = "check canceled"
 		} else {
-			result.Error = safeError(err.Error())
+			result.Error = "check failed"
 		}
 	}
-	m.results[checker.Name()] = result
+	m.results[checker.name] = result
 }
 
 // Run checks dependencies immediately, then at interval, until ctx is canceled.
@@ -105,19 +131,4 @@ func (m *Monitor) Snapshot() []Result {
 		return results[i].Name < results[j].Name
 	})
 	return results
-}
-
-func safeError(message string) string {
-	const maxPrintable = 160
-	output := make([]rune, 0, maxPrintable)
-	for _, char := range message {
-		if !unicode.IsPrint(char) {
-			continue
-		}
-		output = append(output, char)
-		if len(output) == maxPrintable {
-			break
-		}
-	}
-	return string(output)
 }

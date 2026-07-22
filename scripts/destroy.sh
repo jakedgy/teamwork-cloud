@@ -21,6 +21,11 @@ rm -f -- "$cluster_error"
 
 if (( cluster_exists == 1 )); then
   aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION"
+  discovered_hostname=$(kubectl get service ingress-nginx-controller --namespace ingress-nginx --output 'jsonpath={.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+  if [[ -n $discovered_hostname ]]; then
+    NLB_HOSTNAME=$discovered_hostname
+    write_state
+  fi
   helm uninstall twc-lab --namespace twc-lab --ignore-not-found --wait --timeout 15m >/dev/null 2>&1 || failed=1
   kubectl delete service ingress-nginx-controller --namespace ingress-nginx --ignore-not-found=true >/dev/null 2>&1 || failed=1
   helm uninstall ingress-nginx --namespace ingress-nginx --ignore-not-found --wait --timeout 15m >/dev/null 2>&1 || failed=1

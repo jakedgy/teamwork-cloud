@@ -22,7 +22,7 @@ if [[ $NETWORK_MODE == existing ]]; then
   (( ${#CSV_VALUES[@]} >= 2 )) || die "At least two public subnet IDs are required"
 fi
 
-require_commands aws eksctl kubectl helm openssl
+require_commands aws eksctl kubectl helm make openssl
 
 caller_account=$(current_account)
 validate_account_id "$caller_account"
@@ -40,6 +40,18 @@ else
     die "Cluster $CLUSTER_NAME already exists but is not tracked by $STATE_FILE"
   elif [[ $cluster_check != *ResourceNotFoundException* ]]; then
     die "Unable to verify whether cluster $CLUSTER_NAME already exists"
+  fi
+fi
+
+if [[ $NETWORK_MODE == managed ]]; then
+  intended_stack="${CLUSTER_NAME}-vpc"
+  if stack_check=$(aws cloudformation describe-stacks --stack-name "$intended_stack" --region "$AWS_REGION" --query 'Stacks[0].StackStatus' --output text 2>&1); then
+    owner_tag=$(aws cloudformation describe-stacks --stack-name "$intended_stack" --region "$AWS_REGION" --query "Stacks[0].Tags[?Key=='twc-lab:managed'].Value | [0]" --output text)
+    stack_cluster=$(aws cloudformation describe-stacks --stack-name "$intended_stack" --region "$AWS_REGION" --query "Stacks[0].Parameters[?ParameterKey=='ClusterName'].ParameterValue | [0]" --output text)
+    [[ $owner_tag == true ]] || die "Stack $intended_stack exists but is not repository-managed"
+    [[ $stack_cluster == "$CLUSTER_NAME" ]] || die "Stack $intended_stack belongs to cluster $stack_cluster"
+  elif [[ $stack_check != *ValidationError* || $stack_check != *"does not exist"* ]]; then
+    die "Unable to verify whether CloudFormation stack $intended_stack exists"
   fi
 fi
 

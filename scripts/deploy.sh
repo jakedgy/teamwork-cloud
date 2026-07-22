@@ -96,5 +96,5 @@ done
 write_state
 
 printf 'Web app:        http://%s/webapp\n' "$NLB_HOSTNAME"
-printf 'Authentication: http://%s/authentication\n' "$NLB_HOSTNAME"
 printf 'Administration: http://%s/admin\n' "$NLB_HOSTNAME"
+printf 'License admin:  http://%s/admin/license\n' "$NLB_HOSTNAME"

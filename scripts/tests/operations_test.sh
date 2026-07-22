@@ -45,7 +45,8 @@ case "${1:-} ${2:-}" in
       exit 254
     fi
     case "$*" in
-      *"twc-lab:managed"*) printf '%s\n' true ;;
+      *"twc-lab:managed"*) printf '%s\n' "${FAKE_STACK_TAG:-true}" ;;
+      *"ParameterKey=='ClusterName'"*) printf '%s\n' "${FAKE_STACK_CLUSTER:-twc-lab}" ;;
       *"OutputKey=='VpcId'"*) printf '%s\n' vpc-managed ;;
       *"OutputKey=='PublicSubnetIds'"*) printf '%s\n' subnet-ma,subnet-mb ;;
       *) printf '%s\n' CREATE_COMPLETE ;;
@@ -82,6 +83,12 @@ cat >"$FAKE_BIN/helm" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'helm %s\n' "$*" >>"$FAKE_CALLS"
+if [[ "${1:-}" == list ]]; then
+  printf '%s\n' '[{"name":"ingress-nginx","namespace":"ingress-nginx","status":"deployed"},{"name":"twc-lab","namespace":"twc-lab","status":"deployed"}]'
+fi
+if [[ "${1:-}" == uninstall && "${FAKE_HELM_UNINSTALL_FAIL:-0}" == 1 ]]; then
+  exit 1
+fi
 EOF
 
 cat >"$FAKE_BIN/kubectl" <<'EOF'
@@ -92,6 +99,9 @@ case "$*" in
   *"get service ingress-nginx-controller"*) printf '%s\n' "${FAKE_NLB_HOST:-lab.example.test}" ;;
   *"get service twc-lab"*) printf '%s\n' "${FAKE_APP_HOST:-lab.example.test}" ;;
   *"get statefulset"*) printf '%s\n' "${FAKE_REPLICAS:-1}" ;;
+  *"get pods"*"--output name"*) printf '%s\n' 'pod/twc-lab-simulator-abc' 'pod/twc-lab-artemis-0' ;;
+  *"get persistentvolumeclaims"*"--output name"*) printf '%s\n' 'persistentvolumeclaim/data-twc-lab-artemis-0' ;;
+  *"get --raw"*"api/health"*) printf '%s\n' '{"status":"UP","layers":4}' ;;
 esac
 EOF
 
@@ -100,7 +110,28 @@ cat >"$FAKE_BIN/openssl" <<'EOF'
 set -euo pipefail
 printf '0123456789abcdef0123456789abcdef\n'
 EOF
+cat >"$FAKE_BIN/make" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'make %s\n' "$*" >>"$FAKE_CALLS"
+EOF
 chmod +x "$FAKE_BIN"/*
+
+NO_MAKE_BIN="$TEST_ROOT/no-make-bin"
+mkdir -p "$NO_MAKE_BIN"
+ln -s "$(command -v env)" "$NO_MAKE_BIN/env"
+ln -s "$(command -v bash)" "$NO_MAKE_BIN/bash"
+ln -s "$(command -v dirname)" "$NO_MAKE_BIN/dirname"
+for tool in aws eksctl helm kubectl openssl; do
+  ln -s "$FAKE_BIN/$tool" "$NO_MAKE_BIN/$tool"
+done
+
+NO_KUBE_BIN="$TEST_ROOT/no-kube-bin"
+mkdir -p "$NO_KUBE_BIN"
+ln -s "$(command -v env)" "$NO_KUBE_BIN/env"
+ln -s "$(command -v bash)" "$NO_KUBE_BIN/bash"
+ln -s "$(command -v dirname)" "$NO_KUBE_BIN/dirname"
+ln -s "$FAKE_BIN/aws" "$NO_KUBE_BIN/aws"
 
 export FAKE_CALLS="$CALLS"
 export FAKE_STACK_MARK="$TEST_ROOT/stack-created"
@@ -208,6 +239,9 @@ new_case
 expect_fail "existing mode requires a VPC" run_script preflight.sh NETWORK_MODE=existing VPC_ID=
 
 new_case
+expect_fail "preflight requires make" run_script preflight.sh PATH="$NO_MAKE_BIN"
+
+new_case
 expect_fail "cluster lookup errors are not mistaken for absence" run_script preflight.sh FAKE_CLUSTER_ERROR=AccessDeniedException
 
 new_case
@@ -241,6 +275,16 @@ if [[ $(file_mode "$CASE_DIR/.twc-lab/secrets.yaml") == 600 ]]; then record "sec
 if grep -Eq '^secrets:$' "$CASE_DIR/.twc-lab/secrets.yaml" && grep -Eq '^  artemisPassword: "[0-9a-f]{32}"$' "$CASE_DIR/.twc-lab/secrets.yaml"; then record "secret uses the chart password key and 32 characters" pass; else record "secret uses the chart password key and 32 characters" fail; fi
 if [[ $(cut -d= -f1 "$CASE_DIR/.twc-lab/state.env" | tr '\n' ' ') == "ACCOUNT_ID AWS_REGION CLUSTER_NAME NETWORK_MODE VPC_ID SUBNET_IDS STACK_NAME FAILED_SERVICE NLB_HOSTNAME " ]]; then record "state contains only fixed keys" pass; else record "state contains only fixed keys" fail; fi
 if grep -Fq 'nodePools:' "$CASE_DIR/.twc-lab/cluster.yaml" && grep -Fq 'general-purpose' "$CASE_DIR/.twc-lab/cluster.yaml" && grep -Fq 'system' "$CASE_DIR/.twc-lab/cluster.yaml"; then record "renderer enables both Auto Mode pools" pass; else record "renderer enables both Auto Mode pools" fail; fi
+if grep -Fq 'http://lab.example.test/webapp' "$TEST_ROOT/out" && grep -Fq 'http://lab.example.test/admin' "$TEST_ROOT/out" && grep -Fq 'http://lab.example.test/admin/license' "$TEST_ROOT/out" && ! grep -Fq '/authentication' "$TEST_ROOT/out"; then record "deploy prints the required three URLs" pass; else record "deploy prints the required three URLs" fail; fi
+
+new_case
+expect_fail "preflight rejects an unrelated same-name stack" run_script preflight.sh FAKE_STACK_EXISTS=1 FAKE_STACK_TAG=false
+
+new_case
+expect_fail "preflight rejects a managed stack for another cluster" run_script preflight.sh FAKE_STACK_EXISTS=1 FAKE_STACK_CLUSTER=other-cluster
+
+new_case
+expect_ok "preflight accepts the tagged intended managed stack" run_script preflight.sh FAKE_STACK_EXISTS=1
 
 new_case
 expect_fail "managed deploy stops when stack lookup is unauthorized" run_script deploy.sh CONFIRM=1 FAKE_STACK_ERROR=AccessDeniedException
@@ -286,10 +330,22 @@ if [[ ! -e "$CASE_DIR/executed" ]]; then record "state parser never executes val
 
 new_case
 write_state managed
+expect_ok "status emits JSON with live operational layers" run_script status.sh JSON=1 FAKE_NLB_HOST=live.example.test
+if ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' "$TEST_ROOT/out" && grep -Fq '"helmReleases":' "$TEST_ROOT/out" && grep -Fq '"pods":' "$TEST_ROOT/out" && grep -Fq '"pvcs":' "$TEST_ROOT/out" && grep -Fq '"ingressHostname":"live.example.test"' "$TEST_ROOT/out" && grep -Fq '"simulatorHealth":' "$TEST_ROOT/out" && grep -Fq '"layerExplanation":' "$TEST_ROOT/out"; then record "JSON status includes every required operational layer" pass; else record "JSON status includes every required operational layer" fail; fi
+expect_ok "status emits a human operational summary" run_script status.sh FAKE_NLB_HOST=live.example.test
+if grep -Fq 'Helm releases:' "$TEST_ROOT/out" && grep -Fq 'Pods:' "$TEST_ROOT/out" && grep -Fq 'PVCs:' "$TEST_ROOT/out" && grep -Fq 'Ingress:' "$TEST_ROOT/out" && grep -Fq 'Simulator health:' "$TEST_ROOT/out" && grep -Fq 'Layers:' "$TEST_ROOT/out"; then record "human status includes every required operational layer" pass; else record "human status includes every required operational layer" fail; fi
+
+new_case
+write_state managed
 expect_ok "allowed failure can be demonstrated" run_script demo-failure.sh SERVICE=artemis CONFIRM=1
 if grep -Fq 'kubectl scale statefulset twc-lab-artemis --replicas=0' "$CALLS"; then record "failure scales the exact StatefulSet to zero" pass; else record "failure scales the exact StatefulSet to zero" fail; fi
 expect_ok "recorded failure can be restored" run_script demo-restore.sh CONFIRM=1
 if grep -Fq 'kubectl scale statefulset twc-lab-artemis --replicas=1' "$CALLS" && grep -q '^FAILED_SERVICE=$' "$CASE_DIR/.twc-lab/state.env"; then record "restore scales to one and clears state" pass; else record "restore scales to one and clears state" fail; fi
+
+new_case
+write_state managed
+expect_ok "restore is harmless when no failure is recorded" run_script demo-restore.sh PATH="$NO_KUBE_BIN"
+assert_no_call "no-op restore does not scale Kubernetes" "kubectl scale"
 
 new_case
 write_state managed
@@ -306,6 +362,20 @@ expect_ok "managed cleanup resumes after cluster is already absent" run_script d
 assert_no_call "absent cluster skips Kubernetes mutation" "kubectl "
 assert_no_call "absent cluster skips eksctl deletion" "eksctl delete cluster"
 if grep -Fq 'aws cloudformation delete-stack' "$CALLS"; then record "absent cluster still permits managed VPC cleanup" pass; else record "absent cluster still permits managed VPC cleanup" fail; fi
+
+new_case
+write_state managed
+sed 's/^NLB_HOSTNAME=.*/NLB_HOSTNAME=/' "$CASE_DIR/.twc-lab/state.env" >"$CASE_DIR/.twc-lab/state.env.new"
+mv "$CASE_DIR/.twc-lab/state.env.new" "$CASE_DIR/.twc-lab/state.env"
+expect_ok "destroy discovers an unpersisted ingress hostname" run_script destroy.sh CONFIRM=1 FAKE_NLB_HOST=discovered.example.test
+if grep -Fq "DNSName=='discovered.example.test'" "$CALLS"; then record "destroy waits for the discovered ingress load balancer" pass; else record "destroy waits for the discovered ingress load balancer" fail; fi
+
+new_case
+write_state managed
+sed 's/^NLB_HOSTNAME=.*/NLB_HOSTNAME=/' "$CASE_DIR/.twc-lab/state.env" >"$CASE_DIR/.twc-lab/state.env.new"
+mv "$CASE_DIR/.twc-lab/state.env.new" "$CASE_DIR/.twc-lab/state.env"
+expect_fail "destroy preserves a newly discovered hostname on cleanup failure" run_script destroy.sh CONFIRM=1 FAKE_NLB_HOST=retry.example.test FAKE_HELM_UNINSTALL_FAIL=1
+if grep -Fq 'NLB_HOSTNAME=retry.example.test' "$CASE_DIR/.twc-lab/state.env"; then record "retry state retains the discovered load balancer" pass; else record "retry state retains the discovered load balancer" fail; fi
 
 new_case
 write_state existing

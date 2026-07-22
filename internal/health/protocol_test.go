@@ -141,8 +141,8 @@ func TestZooKeeperCheckHonorsCancellation(t *testing.T) {
 	}
 }
 
-func TestArtemisCheckSendsEscapedConnectAndAcceptsConnected(t *testing.T) {
-	password := "se:cr\\et\nvalue\r"
+func TestArtemisCheckSendsRawConnectHeadersAndAcceptsConnected(t *testing.T) {
+	password := "se:cr\\et"
 	endpoint, done := serveOnce(t, func(conn net.Conn) {
 		frame, err := bufio.NewReader(conn).ReadString(0)
 		if err != nil {
@@ -150,14 +150,14 @@ func TestArtemisCheckSendsEscapedConnectAndAcceptsConnected(t *testing.T) {
 			return
 		}
 		for _, expected := range []string{
-			"CONNECT\n", "accept-version:1.2\n", "login:user\\cname\n",
-			"passcode:se\\ccr\\\\et\\nvalue\\r\n", "\n\x00",
+			"CONNECT\n", "accept-version:1.2\n", "login:user:name\n",
+			"passcode:se:cr\\et\n", "\n\x00",
 		} {
 			if !strings.Contains(frame, expected) {
 				t.Errorf("CONNECT frame missing %q: %q", expected, frame)
 			}
 		}
-		_, _ = io.WriteString(conn, "CONNECTED\nversion:1.2\n\n\x00")
+		_, _ = io.WriteString(conn, "CONNECTED\r\nversion:1.2\r\nserver:broker:name\\value\r\n\r\n\x00")
 	})
 
 	checker := NewArtemisChecker(endpoint, "user:name", password)
@@ -167,6 +167,55 @@ func TestArtemisCheckSendsEscapedConnectAndAcceptsConnected(t *testing.T) {
 	<-done
 	if checker.Name() != "artemis" || checker.Endpoint() != endpoint {
 		t.Fatalf("checker identity = %q, %q", checker.Name(), checker.Endpoint())
+	}
+}
+
+func TestArtemisCheckRejectsCredentialLineBreaksBeforeDial(t *testing.T) {
+	tests := []struct {
+		name     string
+		user     string
+		password string
+	}{
+		{name: "login newline", user: "user\nadmin", password: "secret"},
+		{name: "login carriage return", user: "user\radmin", password: "secret"},
+		{name: "passcode newline", user: "user", password: "secret\nheader:value"},
+		{name: "passcode carriage return", user: "user", password: "secret\rheader:value"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := NewArtemisChecker("127.0.0.1:1", test.user, test.password).Check(context.Background())
+			if err == nil || err.Error() != "artemis credentials invalid" {
+				t.Fatalf("Check() error = %v, want sanitized credential error", err)
+			}
+			if strings.Contains(err.Error(), test.user) || strings.Contains(err.Error(), test.password) {
+				t.Fatalf("Check() error leaked credential: %v", err)
+			}
+		})
+	}
+}
+
+func TestArtemisCheckValidatesConnectedHeaders(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+	}{
+		{name: "missing version", response: "CONNECTED\nserver:broker\n\n\x00"},
+		{name: "wrong version", response: "CONNECTED\nversion:1.1\n\n\x00"},
+		{name: "malformed header", response: "CONNECTED\nversion:1.2\nmalformed\n\n\x00"},
+		{name: "missing blank line", response: "CONNECTED\nversion:1.2\x00"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			endpoint, done := serveOnce(t, func(conn net.Conn) {
+				_, _ = bufio.NewReader(conn).ReadString(0)
+				_, _ = io.WriteString(conn, test.response)
+			})
+			err := NewArtemisChecker(endpoint, "artemis", "secret").Check(context.Background())
+			<-done
+			if err == nil || err.Error() != "artemis protocol check failed" {
+				t.Fatalf("Check() error = %v, want sanitized protocol error", err)
+			}
+		})
 	}
 }
 

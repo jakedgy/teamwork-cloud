@@ -303,7 +303,7 @@ for name in twc-lab-cassandra twc-lab-zookeeper twc-lab-artemis; do
   assert_resource_contains "$rendered" StatefulSet "$name" \
     '^    whenDeleted: Delete$' "delete ${name} PVC after workload deletion"
   assert_resource_contains "$rendered" StatefulSet "$name" \
-    '^    whenScaled: Delete$' "delete ${name} PVC after scale-down"
+    '^    whenScaled: Retain$' "retain ${name} PVC during failure-demo scale-down"
 done
 
 assert_contains '^        runAsNonRoot: true$' 'run simulator as non-root'
@@ -384,5 +384,14 @@ other_cassandra="$(awk '/^  name: .*\-cassandra$/ { print $2; exit }' "$other_lo
 
 grep -q '^    enableHttps: false$' "$chart_dir/../../cluster/ingress-nginx-values.yaml" || \
   fail 'ingress-nginx HTTPS listener was not disabled'
+grep -q '^    loadBalancerClass: eks.amazonaws.com/nlb$' \
+  "$chart_dir/../../cluster/ingress-nginx-values.yaml" || \
+  fail 'ingress-nginx Service does not select the EKS Auto Mode NLB class'
+grep -q '^      service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing$' \
+  "$chart_dir/../../cluster/ingress-nginx-values.yaml" || \
+  fail 'ingress-nginx NLB is not internet-facing'
+grep -q '^      service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip$' \
+  "$chart_dir/../../cluster/ingress-nginx-values.yaml" || \
+  fail 'ingress-nginx NLB does not target pod IPs'
 
 printf 'PASS: chart render contract satisfied\n'

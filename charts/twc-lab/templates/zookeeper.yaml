@@ -27,7 +27,7 @@ spec:
   replicas: 1
   persistentVolumeClaimRetentionPolicy:
     whenDeleted: Delete
-    whenScaled: Delete
+    whenScaled: Retain
   selector:
     matchLabels:
       {{- include "twc-lab.componentSelectorLabels" (dict "root" . "component" "zookeeper") | nindent 6 }}

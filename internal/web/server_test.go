@@ -61,6 +61,31 @@ func TestSimulatorPagesAreAvailableAndClearlyLabeled(t *testing.T) {
 	}
 }
 
+func TestSimulatorPagesMarkCurrentNavigationLink(t *testing.T) {
+	tests := []struct {
+		path string
+		href string
+	}{
+		{path: "/webapp", href: "/webapp"},
+		{path: "/authentication", href: "/authentication"},
+		{path: "/admin", href: "/admin"},
+		{path: "/admin/license", href: "/admin/license"},
+	}
+	for _, test := range tests {
+		t.Run(test.path, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			newTestHandler(t, nil).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, test.path, nil))
+			body := recorder.Body.String()
+			if !strings.Contains(body, `href="`+test.href+`" aria-current="page"`) {
+				t.Fatalf("active navigation link not marked in body: %s", body)
+			}
+			if count := strings.Count(body, `aria-current="page"`); count != 1 {
+				t.Fatalf("aria-current count = %d, want 1", count)
+			}
+		})
+	}
+}
+
 func TestLicensePageIsReadOnlyAndExplainsMissingLicense(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/admin/license", nil)
 	recorder := httptest.NewRecorder()
@@ -90,6 +115,9 @@ func TestHealthAPIIncludesMetadataAndSortedSanitizedResults(t *testing.T) {
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if cacheControl := recorder.Header().Get("Cache-Control"); cacheControl != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", cacheControl)
 	}
 	var response struct {
 		Cluster   string          `json:"cluster"`

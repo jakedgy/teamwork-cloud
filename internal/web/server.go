@@ -78,6 +78,7 @@ func New(snapshotter Snapshotter, metadata Metadata) (http.Handler, error) {
 	mux.HandleFunc("GET /admin/license", render("license", "License", "license"))
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFiles))))
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
 		results := append([]health.Result(nil), snapshotter.Snapshot()...)
 		for index := range results {
 			results[index].Error = safeResultError(results[index].Error)

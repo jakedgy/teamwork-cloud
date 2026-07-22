@@ -17,10 +17,10 @@
     <span class="boundary">Simulated product layer</span>
   </header>
   <nav aria-label="Primary navigation">
-    <a href="/webapp">Overview</a>
-    <a href="/authentication">Authentication</a>
-    <a href="/admin">Administration</a>
-    <a href="/admin/license">License</a>
+    <a href="/webapp"{{if eq .Active "webapp"}} aria-current="page"{{end}}>Overview</a>
+    <a href="/authentication"{{if eq .Active "authentication"}} aria-current="page"{{end}}>Authentication</a>
+    <a href="/admin"{{if eq .Active "admin"}} aria-current="page"{{end}}>Administration</a>
+    <a href="/admin/license"{{if eq .Active "license"}} aria-current="page"{{end}}>License</a>
   </nav>
   <main id="main">{{template "content" .}}</main>
   <footer>

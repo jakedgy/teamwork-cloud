@@ -74,8 +74,11 @@ func duration(lookup func(string) (string, bool), key string, fallback time.Dura
 	}
 
 	parsed, err := time.ParseDuration(value)
-	if err != nil || parsed <= 0 {
+	if err != nil {
 		return 0, fmt.Errorf("invalid %s", key)
+	}
+	if parsed <= 0 {
+		return 0, fmt.Errorf("%s must be a positive duration", key)
 	}
 	return parsed, nil
 }

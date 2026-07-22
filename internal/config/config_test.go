@@ -52,12 +52,13 @@ func TestFromLookupOverridesDurationsAndEndpoints(t *testing.T) {
 
 func TestFromLookupRejectsInvalidDurations(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		key   string
-		value string
+		name                    string
+		key                     string
+		value                   string
+		positiveDurationMessage bool
 	}{
-		{name: "zero", key: "TWC_LAB_CHECK_INTERVAL", value: "0s"},
-		{name: "negative", key: "TWC_LAB_CHECK_TIMEOUT", value: "-1s"},
+		{name: "zero", key: "TWC_LAB_CHECK_INTERVAL", value: "0s", positiveDurationMessage: true},
+		{name: "negative", key: "TWC_LAB_CHECK_TIMEOUT", value: "-1s", positiveDurationMessage: true},
 		{name: "malformed", key: "TWC_LAB_CHECK_INTERVAL", value: "soon"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -67,6 +68,9 @@ func TestFromLookupRejectsInvalidDurations(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tc.key) {
 				t.Errorf("FromLookup() error = %q, want environment variable %q", err, tc.key)
+			}
+			if tc.positiveDurationMessage && !strings.Contains(err.Error(), "must be a positive duration") {
+				t.Errorf("FromLookup() error = %q, want positive duration guidance", err)
 			}
 		})
 	}

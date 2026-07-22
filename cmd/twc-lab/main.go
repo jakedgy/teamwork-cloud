@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -23,29 +22,31 @@ func main() {
 
 	server := &http.Server{
 		Addr: cfg.ListenAddr,
+		// Bound header reads and idle keep-alive connections to limit resource use.
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			http.Error(w, "service unavailable", http.StatusServiceUnavailable)
 		}),
 	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- server.ListenAndServe()
 	}()
 
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
-	defer signal.Stop(signals)
-
 	select {
 	case err := <-errCh:
 		if !errors.Is(err, http.ErrServerClosed) {
 			log.Fatal(err)
 		}
-	case <-signals:
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := server.Shutdown(ctx); err != nil {
+		if err := server.Shutdown(shutdownCtx); err != nil {
 			log.Printf("shutdown error: %v", err)
 		}
 	}

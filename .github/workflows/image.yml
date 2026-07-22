@@ -15,6 +15,10 @@ permissions:
   contents: read
   packages: write
 
+concurrency:
+  group: publish-image-${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -23,7 +27,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Resolve immutable tags
+      - name: Resolve release tags
         id: tags
         shell: bash
         env:
@@ -54,6 +58,17 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Refuse to overwrite version tag
+        shell: bash
+        env:
+          IMAGE: ${{ steps.tags.outputs.image }}
+          VERSION: ${{ steps.tags.outputs.version }}
+        run: |
+          if docker buildx imagetools inspect "${IMAGE}:${VERSION}" >/dev/null 2>&1; then
+            echo "version tag ${IMAGE}:${VERSION} already exists; refusing to overwrite it" >&2
+            exit 1
+          fi
 
       - name: Build and publish multi-architecture image
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0

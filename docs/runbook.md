@@ -147,7 +147,7 @@ For an additional read-only residual check, replace the placeholders with the ex
 
 ```bash
 aws eks describe-cluster --name <exact-cluster-name> --region <exact-region>
-aws resourcegroupstaggingapi get-resources --region <exact-region> --tag-filters Key=kubernetes.io/cluster/<exact-cluster-name>
+aws resourcegroupstaggingapi get-resources --region <exact-region> --resource-type-filters ec2:volume elasticloadbalancing:loadbalancer --tag-filters Key=eks:eks-cluster-name,Values=<exact-cluster-name>
 ```
 
-After a successful destroy, `describe-cluster` should report that the exact cluster is not found and the tag query should return no lab-owned resources. In managed mode, also check the exact recorded CloudFormation stack name with `aws cloudformation describe-stacks --stack-name <exact-stack-name> --region <exact-region>`; it should be absent. In existing mode, the VPC and subnets should remain unchanged.
+After a successful destroy, `describe-cluster` should report that the exact cluster is not found and the `eks:eks-cluster-name` query should return no lab-owned EBS volumes or load balancers. In managed mode, also check the exact recorded CloudFormation stack name with `aws cloudformation describe-stacks --stack-name <exact-stack-name> --region <exact-region>`; it should be absent. In existing mode, the VPC and subnets should remain unchanged.

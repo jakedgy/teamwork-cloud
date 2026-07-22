@@ -22,6 +22,8 @@ You need an AWS account in which you may create EKS, IAM, EC2/VPC, Elastic Load 
 - `eksctl` with EKS Auto Mode support
 - `kubectl`
 - Helm 3
+- `jq`
+- OpenSSL
 - GNU Make and Bash
 - Docker only for `make container-test` or a local image build
 
@@ -133,6 +135,8 @@ This is a clean-room educational reduction. It must not be used to infer Teamwor
 
 ## CI and image publication
 
-Pull requests and `main` run only free, local verification: Go tests and vet, Helm rendering, offline lifecycle tests, shell checks, a non-root container assertion, and Trivy. They receive no AWS credentials. Version tags and manually supplied versions publish `linux/amd64` and `linux/arm64` images to GHCR with a version tag and a `sha-<commit>` tag; the workflows never publish `latest`.
+Pull requests and `main` run only free, local verification: Go tests and vet, Helm rendering, offline lifecycle tests, shell checks, a non-root container assertion, and Trivy. They receive no AWS credentials. Version tags and manually supplied versions publish `linux/amd64` and `linux/arm64` images to GHCR with a version tag and a `sha-<commit>` tag; the workflows never publish `latest` and refuse to overwrite an existing version tag.
 
-The **EKS smoke test** workflow is manual because it creates paid resources. Configure `AWS_ROLE_ARN` and `AWS_REGION` as GitHub Actions repository **variables** (neither value is a secret). The role must trust this repository's GitHub OIDC subject and have the scoped permissions required by `make preflight`, `make deploy`, and `make destroy`. Do not configure long-lived AWS access-key secrets. Each run uses `twc-lab-smoke-${{ github.run_id }}` and always attempts `CONFIRM=1 make destroy`, including after an earlier step fails.
+The **EKS smoke test** workflow is manual because it creates paid resources. Configure the `eks-smoke` GitHub environment with required reviewers and restrict its deployment branches to the repository default branch. Configure `AWS_ROLE_ARN` and `AWS_REGION` as environment or repository **variables** (neither value is a secret). The role's GitHub OIDC trust must allow the exact subject `repo:jakedgy/teamwork-cloud:environment:eks-smoke` and have the scoped permissions required by `make preflight`, `make deploy`, and `make destroy`. Do not configure long-lived AWS access-key secrets.
+
+The workflow publishes the current commit as a unique `smoke-<run-id>-<short-sha>` image before deployment. The `ghcr.io/jakedgy/teamwork-cloud` package must be public so EKS can pull it anonymously; the chart intentionally configures no registry credential. Each run uses `twc-lab-smoke-${{ github.run_id }}` and refreshes its OIDC credentials immediately before the always-run `CONFIRM=1 make destroy` step.

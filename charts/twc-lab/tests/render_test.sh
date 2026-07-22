@@ -191,6 +191,9 @@ assert_resource "$rendered" StatefulSet twc-lab-zookeeper '' 'render zookeeper S
 assert_resource "$rendered" StatefulSet twc-lab-artemis '' 'render artemis StatefulSet'
 assert_count 1 '^kind: Deployment$' 'render exactly one Deployment'
 assert_resource "$rendered" Deployment twc-lab-simulator '' 'render simulator Deployment'
+assert_resource_contains "$rendered" Deployment twc-lab-simulator \
+  'image: "ghcr.io/jakedgy/teamwork-cloud:v0.1.0"' \
+  'render the published v0.1.0 simulator image by default'
 assert_resource "$rendered" Service twc-lab-simulator ClusterIP \
   'render simulator ClusterIP Service'
 assert_resource "$rendered" StorageClass auto-ebs '' 'render chart-managed auto-ebs StorageClass'

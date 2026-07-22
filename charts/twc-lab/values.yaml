@@ -15,7 +15,7 @@ secrets:
 simulator:
   image:
     repository: ghcr.io/jakedgy/teamwork-cloud
-    tag: "0.1.0"
+    tag: "v0.1.0"
     pullPolicy: IfNotPresent
   resources:
     requests:

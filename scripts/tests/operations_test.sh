@@ -320,6 +320,8 @@ PUBLIC_SUBNET_IDS=subnet-a,subnet-b
 STACK_NAME=twc-lab-vpc
 VPC_STACK_ID=arn:aws:cloudformation:us-east-2:111122223333:stack/twc-lab-vpc/stack123
 PENDING_VOLUME_IDS=
+SIMULATOR_IMAGE_REPOSITORY=
+SIMULATOR_IMAGE_TAG=
 FAILED_SERVICE=
 NLB_HOSTNAME=lab.example.test
 EOF
@@ -377,13 +379,46 @@ if grep -Fq -- "--kubeconfig $CASE_DIR/.twc-lab/kubeconfig" "$CALLS" && ! grep -
 if [[ $(file_mode "$CASE_DIR/.twc-lab/state.env") == 600 ]]; then record "state file permissions are 0600" pass; else record "state file permissions are 0600" fail; fi
 if [[ $(file_mode "$CASE_DIR/.twc-lab/secrets.yaml") == 600 ]]; then record "secrets file permissions are 0600" pass; else record "secrets file permissions are 0600" fail; fi
 if grep -Eq '^secrets:$' "$CASE_DIR/.twc-lab/secrets.yaml" && grep -Eq '^  artemisPassword: "[0-9a-f]{32}"$' "$CASE_DIR/.twc-lab/secrets.yaml"; then record "secret uses the chart password key and 32 characters" pass; else record "secret uses the chart password key and 32 characters" fail; fi
-if [[ $(cut -d= -f1 "$CASE_DIR/.twc-lab/state.env" | tr '\n' ' ') == "ACCOUNT_ID AWS_REGION CLUSTER_NAME NETWORK_MODE PHASE DEPLOYMENT_ID CLUSTER_ARN VPC_ID PUBLIC_SUBNET_IDS STACK_NAME VPC_STACK_ID PENDING_VOLUME_IDS FAILED_SERVICE NLB_HOSTNAME " ]]; then record "state contains only fixed keys" pass; else record "state contains only fixed keys" fail; fi
+if [[ $(cut -d= -f1 "$CASE_DIR/.twc-lab/state.env" | tr '\n' ' ') == "ACCOUNT_ID AWS_REGION CLUSTER_NAME NETWORK_MODE PHASE DEPLOYMENT_ID CLUSTER_ARN VPC_ID PUBLIC_SUBNET_IDS STACK_NAME VPC_STACK_ID PENDING_VOLUME_IDS SIMULATOR_IMAGE_REPOSITORY SIMULATOR_IMAGE_TAG FAILED_SERVICE NLB_HOSTNAME " ]]; then record "state contains only fixed keys" pass; else record "state contains only fixed keys" fail; fi
 if grep -q '^DEPLOYMENT_ID=' "$CASE_DIR/.twc-lab/state.env" && grep -q '^CLUSTER_ARN=' "$CASE_DIR/.twc-lab/state.env" && grep -q '^VPC_STACK_ID=' "$CASE_DIR/.twc-lab/state.env"; then record "state records deployment, cluster, and stack identities" pass; else record "state records deployment, cluster, and stack identities" fail; fi
 if grep -q '^PHASE=DEPLOYED$' "$CASE_DIR/.twc-lab/state.env" && grep -q '^PENDING_VOLUME_IDS=$' "$CASE_DIR/.twc-lab/state.env"; then record "deployed state records lifecycle phase and pending storage" pass; else record "deployed state records lifecycle phase and pending storage" fail; fi
 if grep -Fq 'DeploymentId=0123456789abcdef0123456789abcdef' "$CALLS" && grep -Fq 'twc-lab:deployment-id=0123456789abcdef0123456789abcdef' "$CALLS"; then record "deployment identity tags both stack and cluster" pass; else record "deployment identity tags both stack and cluster" fail; fi
 if grep -Fq 'nodePools:' "$CASE_DIR/.twc-lab/cluster.yaml" && grep -Fq 'general-purpose' "$CASE_DIR/.twc-lab/cluster.yaml" && grep -Fq 'system' "$CASE_DIR/.twc-lab/cluster.yaml"; then record "renderer enables both Auto Mode pools" pass; else record "renderer enables both Auto Mode pools" fail; fi
 if grep -Fq 'twc-lab:deployment-id: 0123456789abcdef0123456789abcdef' "$CASE_DIR/.twc-lab/cluster.yaml"; then record "renderer requests cluster ownership tag atomically" pass; else record "renderer requests cluster ownership tag atomically" fail; fi
 if grep -Fq 'http://lab.example.test/webapp' "$TEST_ROOT/out" && grep -Fq 'http://lab.example.test/admin' "$TEST_ROOT/out" && grep -Fq 'http://lab.example.test/admin/license' "$TEST_ROOT/out" && ! grep -Fq '/authentication' "$TEST_ROOT/out"; then record "deploy prints the required three URLs" pass; else record "deploy prints the required three URLs" fail; fi
+if ! grep -Fq 'simulator.image.repository' "$CALLS" && ! grep -Fq 'simulator.image.tag' "$CALLS"; then record "default deploy leaves simulator image values unchanged" pass; else record "default deploy leaves simulator image values unchanged" fail; fi
+
+new_case
+expect_fail "simulator image repository requires a tag" run_script deploy.sh SIMULATOR_IMAGE_REPOSITORY=ghcr.io/jakedgy/teamwork-cloud CONFIRM=1
+assert_no_call "unpaired simulator repository is rejected before AWS" "aws "
+
+new_case
+expect_fail "simulator image tag requires a repository" run_script deploy.sh SIMULATOR_IMAGE_TAG=smoke-123 CONFIRM=1
+assert_no_call "unpaired simulator tag is rejected before AWS" "aws "
+
+new_case
+expect_fail "unsafe simulator image repository is rejected" run_script deploy.sh SIMULATOR_IMAGE_REPOSITORY='ghcr.io/Jakedgy/teamwork-cloud;bad' SIMULATOR_IMAGE_TAG=smoke-123 CONFIRM=1
+assert_no_call "unsafe simulator repository is rejected before AWS" "aws "
+
+new_case
+expect_fail "unsafe simulator image tag is rejected" run_script deploy.sh SIMULATOR_IMAGE_REPOSITORY=ghcr.io/jakedgy/teamwork-cloud SIMULATOR_IMAGE_TAG='bad tag' CONFIRM=1
+assert_no_call "unsafe simulator tag is rejected before AWS" "aws "
+
+new_case
+too_long_image_tag=$(printf 'a%.0s' {1..129})
+expect_fail "simulator image tag length is bounded" run_script deploy.sh SIMULATOR_IMAGE_REPOSITORY=ghcr.io/jakedgy/teamwork-cloud "SIMULATOR_IMAGE_TAG=$too_long_image_tag" CONFIRM=1
+assert_no_call "oversized simulator tag is rejected before AWS" "aws "
+
+new_case
+expect_ok "paired simulator image override deploys" run_script deploy.sh SIMULATOR_IMAGE_REPOSITORY=ghcr.io/jakedgy/teamwork-cloud SIMULATOR_IMAGE_TAG=smoke-123 CONFIRM=1
+if grep -Fq -- '--set-string simulator.image.repository=ghcr.io/jakedgy/teamwork-cloud --set-string simulator.image.tag=smoke-123' "$CALLS"; then record "simulator image override uses exact separate Helm values" pass; else record "simulator image override uses exact separate Helm values" fail; fi
+if grep -q '^SIMULATOR_IMAGE_REPOSITORY=ghcr.io/jakedgy/teamwork-cloud$' "$CASE_DIR/.twc-lab/state.env" && grep -q '^SIMULATOR_IMAGE_TAG=smoke-123$' "$CASE_DIR/.twc-lab/state.env"; then record "simulator image override is persisted" pass; else record "simulator image override is persisted" fail; fi
+: >"$CALLS"
+expect_ok "simulator image override is reused on retry" run_script deploy.sh CONFIRM=1
+if grep -Fq -- '--set-string simulator.image.repository=ghcr.io/jakedgy/teamwork-cloud --set-string simulator.image.tag=smoke-123' "$CALLS"; then record "retry reuses exact simulator Helm values" pass; else record "retry reuses exact simulator Helm values" fail; fi
+: >"$CALLS"
+expect_fail "conflicting simulator image override is rejected" run_script deploy.sh SIMULATOR_IMAGE_REPOSITORY=ghcr.io/jakedgy/teamwork-cloud SIMULATOR_IMAGE_TAG=smoke-456 CONFIRM=1
+assert_no_call "conflicting simulator image override never reaches Helm" "helm "
 
 new_case
 expect_fail "preflight rejects an unrelated same-name stack" run_script preflight.sh FAKE_STACK_EXISTS=1 FAKE_STACK_TAG=false

@@ -13,6 +13,9 @@ requested_mode_set=${NETWORK_MODE+x}; requested_mode=${NETWORK_MODE:-}
 requested_vpc_set=${VPC_ID+x}; requested_vpc=${VPC_ID:-}
 requested_public_subnets_set=${PUBLIC_SUBNET_IDS+x}; requested_public_subnets=${PUBLIC_SUBNET_IDS:-}
 requested_legacy_subnets_set=${SUBNET_IDS+x}; requested_legacy_subnets=${SUBNET_IDS:-}
+requested_image_repository_set=${SIMULATOR_IMAGE_REPOSITORY+x}; requested_image_repository=${SIMULATOR_IMAGE_REPOSITORY:-}
+requested_image_tag_set=${SIMULATOR_IMAGE_TAG+x}; requested_image_tag=${SIMULATOR_IMAGE_TAG:-}
+validate_simulator_image_override "$requested_image_repository" "$requested_image_tag"
 if [[ -n $requested_public_subnets_set && -n $requested_legacy_subnets_set && $requested_public_subnets != "$requested_legacy_subnets" ]]; then
   die "PUBLIC_SUBNET_IDS conflicts with legacy SUBNET_IDS"
 fi
@@ -26,6 +29,8 @@ if [[ -f $STATE_FILE ]]; then
   [[ -z $requested_mode_set || $requested_mode == "$NETWORK_MODE" ]] || die "NETWORK_MODE conflicts with tracked state"
   [[ -z $requested_vpc_set || $requested_vpc == "$VPC_ID" ]] || die "VPC_ID conflicts with tracked state"
   [[ -z $requested_subnets_set || $requested_subnets == "$PUBLIC_SUBNET_IDS" ]] || die "PUBLIC_SUBNET_IDS conflicts with tracked state"
+  [[ -z $requested_image_repository_set || $requested_image_repository == "$SIMULATOR_IMAGE_REPOSITORY" ]] || die "SIMULATOR_IMAGE_REPOSITORY conflicts with tracked state"
+  [[ -z $requested_image_tag_set || $requested_image_tag == "$SIMULATOR_IMAGE_TAG" ]] || die "SIMULATOR_IMAGE_TAG conflicts with tracked state"
   [[ $PHASE != CLUSTER_DELETING ]] || die "Cluster deletion is in progress; run destroy to resume cleanup"
 fi
 AWS_REGION=${AWS_REGION:-us-east-2}
@@ -41,6 +46,9 @@ DEPLOYMENT_ID=${DEPLOYMENT_ID:-}
 CLUSTER_ARN=${CLUSTER_ARN:-}
 VPC_STACK_ID=${VPC_STACK_ID:-}
 PENDING_VOLUME_IDS=${PENDING_VOLUME_IDS:-}
+SIMULATOR_IMAGE_REPOSITORY=${SIMULATOR_IMAGE_REPOSITORY:-}
+SIMULATOR_IMAGE_TAG=${SIMULATOR_IMAGE_TAG:-}
+validate_simulator_image_override "$SIMULATOR_IMAGE_REPOSITORY" "$SIMULATOR_IMAGE_TAG"
 FAILED_SERVICE=${FAILED_SERVICE:-}
 NLB_HOSTNAME=${NLB_HOSTNAME:-}
 
@@ -137,10 +145,19 @@ lab_helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
   --values "$SCRIPT_ROOT/cluster/ingress-nginx-values.yaml" --atomic --timeout 15m
 
 verify_cluster_identity
-lab_helm upgrade --install twc-lab "$SCRIPT_ROOT/charts/twc-lab" \
-  --namespace twc-lab --create-namespace --values "$SECRETS_FILE" \
-  --set-string "clusterName=$CLUSTER_NAME" --set-string "awsRegion=$AWS_REGION" \
-  --atomic --timeout 15m
+install_lab_chart() {
+  lab_helm upgrade --install twc-lab "$SCRIPT_ROOT/charts/twc-lab" \
+    --namespace twc-lab --create-namespace --values "$SECRETS_FILE" \
+    --set-string "clusterName=$CLUSTER_NAME" --set-string "awsRegion=$AWS_REGION" \
+    "$@" --atomic --timeout 15m
+}
+if [[ -n $SIMULATOR_IMAGE_REPOSITORY ]]; then
+  install_lab_chart \
+    --set-string "simulator.image.repository=$SIMULATOR_IMAGE_REPOSITORY" \
+    --set-string "simulator.image.tag=$SIMULATOR_IMAGE_TAG"
+else
+  install_lab_chart
+fi
 
 verify_cluster_identity
 lab_kubectl wait --namespace twc-lab --for=condition=Ready pod --all --timeout=15m

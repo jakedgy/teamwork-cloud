@@ -65,11 +65,12 @@ load_state() {
   [[ -f $STATE_FILE ]] || die "State file not found: $STATE_FILE"
   local key value
   ACCOUNT_ID= AWS_REGION= CLUSTER_NAME= NETWORK_MODE= PHASE= DEPLOYMENT_ID= CLUSTER_ARN=
-  VPC_ID= PUBLIC_SUBNET_IDS= SUBNET_IDS= STACK_NAME= VPC_STACK_ID= PENDING_VOLUME_IDS= FAILED_SERVICE= NLB_HOSTNAME=
+  VPC_ID= PUBLIC_SUBNET_IDS= SUBNET_IDS= STACK_NAME= VPC_STACK_ID= PENDING_VOLUME_IDS=
+  SIMULATOR_IMAGE_REPOSITORY= SIMULATOR_IMAGE_TAG= FAILED_SERVICE= NLB_HOSTNAME=
   while IFS='=' read -r key value || [[ -n ${key:-} ]]; do
     [[ -n ${key:-} ]] || continue
     case "$key" in
-      ACCOUNT_ID|AWS_REGION|CLUSTER_NAME|NETWORK_MODE|PHASE|DEPLOYMENT_ID|CLUSTER_ARN|VPC_ID|PUBLIC_SUBNET_IDS|SUBNET_IDS|STACK_NAME|VPC_STACK_ID|PENDING_VOLUME_IDS|FAILED_SERVICE|NLB_HOSTNAME)
+      ACCOUNT_ID|AWS_REGION|CLUSTER_NAME|NETWORK_MODE|PHASE|DEPLOYMENT_ID|CLUSTER_ARN|VPC_ID|PUBLIC_SUBNET_IDS|SUBNET_IDS|STACK_NAME|VPC_STACK_ID|PENDING_VOLUME_IDS|SIMULATOR_IMAGE_REPOSITORY|SIMULATOR_IMAGE_TAG|FAILED_SERVICE|NLB_HOSTNAME)
         [[ $value != *$'\n'* && $value != *$'\r'* ]] || die "Invalid newline in state value"
         printf -v "$key" '%s' "$value"
         ;;
@@ -83,6 +84,7 @@ load_state() {
   validate_network_mode "$NETWORK_MODE"
   validate_phase "$PHASE"
   resolve_public_subnet_ids
+  validate_simulator_image_override "$SIMULATOR_IMAGE_REPOSITORY" "$SIMULATOR_IMAGE_TAG"
   [[ $DEPLOYMENT_ID =~ ^[a-f0-9]{32}$ ]] || die "State contains an invalid deployment ID"
   [[ -z $CLUSTER_ARN ]] || validate_cluster_arn "$CLUSTER_ARN"
   [[ -z $VPC_STACK_ID ]] || validate_stack_id "$VPC_STACK_ID"
@@ -137,6 +139,8 @@ write_state() {
     printf 'STACK_NAME=%s\n' "${STACK_NAME:-}"
     printf 'VPC_STACK_ID=%s\n' "${VPC_STACK_ID:-}"
     printf 'PENDING_VOLUME_IDS=%s\n' "${PENDING_VOLUME_IDS:-}"
+    printf 'SIMULATOR_IMAGE_REPOSITORY=%s\n' "${SIMULATOR_IMAGE_REPOSITORY:-}"
+    printf 'SIMULATOR_IMAGE_TAG=%s\n' "${SIMULATOR_IMAGE_TAG:-}"
     printf 'FAILED_SERVICE=%s\n' "${FAILED_SERVICE:-}"
     printf 'NLB_HOSTNAME=%s\n' "${NLB_HOSTNAME:-}"
   } >"$tmp"
@@ -190,6 +194,14 @@ resolve_public_subnet_ids() {
     die "PUBLIC_SUBNET_IDS conflicts with legacy SUBNET_IDS"
   fi
   PUBLIC_SUBNET_IDS=${PUBLIC_SUBNET_IDS:-$SUBNET_IDS}
+}
+
+validate_simulator_image_override() {
+  local repository=$1 tag=$2
+  if [[ -z $repository && -z $tag ]]; then return 0; fi
+  [[ -n $repository && -n $tag ]] || die "SIMULATOR_IMAGE_REPOSITORY and SIMULATOR_IMAGE_TAG must be set together"
+  [[ $repository =~ ^ghcr\.io/[a-z0-9]+([._-][a-z0-9]+)*/[a-z0-9]+([._-][a-z0-9]+)*$ ]] || die "Invalid SIMULATOR_IMAGE_REPOSITORY"
+  (( ${#tag} <= 128 )) && [[ $tag =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]] || die "Invalid SIMULATOR_IMAGE_TAG"
 }
 
 validate_cluster_arn() {

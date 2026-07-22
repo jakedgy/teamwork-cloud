@@ -95,13 +95,26 @@ func New(snapshotter Snapshotter, metadata Metadata) (http.Handler, error) {
 			CheckedAt: checkedAt, Services: results,
 		})
 	})
-	probe := func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))
-	}
-	mux.HandleFunc("GET /healthz", probe)
-	mux.HandleFunc("GET /readyz", probe)
+	})
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
+		results := snapshotter.Snapshot()
+		if len(results) == 0 {
+			http.Error(w, "not ready", http.StatusServiceUnavailable)
+			return
+		}
+		for _, result := range results {
+			if result.CheckedAt.IsZero() {
+				http.Error(w, "not ready", http.StatusServiceUnavailable)
+				return
+			}
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte("ok\n"))
+	})
 
 	return securityHeaders(mux), nil
 }

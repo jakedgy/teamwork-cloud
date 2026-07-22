@@ -131,17 +131,51 @@ func TestHealthAPIDoesNotMutateSnapshotterResults(t *testing.T) {
 	}
 }
 
-func TestProcessProbesStayHealthyWhenDependencyIsDown(t *testing.T) {
+func TestHealthzStaysHealthyBeforeFirstDependencyCheck(t *testing.T) {
 	handler := newTestHandler(t, []health.Result{{
-		Name: "artemis", Status: health.StatusUnavailable, Error: "check failed",
+		Name: "artemis", Status: health.StatusStarting,
 	}})
-	for _, path := range []string{"/healthz", "/readyz"} {
-		request := httptest.NewRequest(http.MethodGet, path, nil)
-		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, request)
-		if recorder.Code != http.StatusOK {
-			t.Fatalf("%s status = %d, want %d", path, recorder.Code, http.StatusOK)
-		}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+}
+
+func TestReadyzReturnsUnavailableBeforeFirstDependencyCheck(t *testing.T) {
+	handler := newTestHandler(t, []health.Result{{
+		Name: "artemis", Status: health.StatusStarting,
+	}})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusServiceUnavailable)
+	}
+}
+
+func TestReadyzWaitsUntilEveryDependencyHasBeenChecked(t *testing.T) {
+	handler := newTestHandler(t, []health.Result{
+		{Name: "artemis", Status: health.StatusUnavailable, CheckedAt: time.Now(), Error: "check failed"},
+		{Name: "cassandra", Status: health.StatusStarting},
+	})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusServiceUnavailable)
+	}
+}
+
+func TestReadyzStaysHealthyWhenCheckedDependencyIsUnavailable(t *testing.T) {
+	handler := newTestHandler(t, []health.Result{{
+		Name: "artemis", Status: health.StatusUnavailable, CheckedAt: time.Now(), Error: "password=secret\ngoroutine 12",
+	}})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if strings.Contains(recorder.Body.String(), "password") || strings.Contains(recorder.Body.String(), "goroutine") {
+		t.Fatalf("readiness response leaked health details: %q", recorder.Body.String())
 	}
 }
 

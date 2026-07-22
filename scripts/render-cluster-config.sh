@@ -11,13 +11,15 @@ else
   CLUSTER_NAME=${CLUSTER_NAME:-twc-lab}
   DEPLOYMENT_ID=${DEPLOYMENT_ID:-}
   VPC_ID=${VPC_ID:-}
+  PUBLIC_SUBNET_IDS=${PUBLIC_SUBNET_IDS:-}
   SUBNET_IDS=${SUBNET_IDS:-}
+  resolve_public_subnet_ids
 fi
-[[ -n $VPC_ID && -n $SUBNET_IDS ]] || die "VPC_ID and SUBNET_IDS are required to render cluster configuration"
+[[ -n $VPC_ID && -n $PUBLIC_SUBNET_IDS ]] || die "VPC_ID and PUBLIC_SUBNET_IDS are required to render cluster configuration"
 [[ $DEPLOYMENT_ID =~ ^[a-f0-9]{32}$ ]] || die "DEPLOYMENT_ID is required to render cluster configuration"
 require_commands aws
 ensure_lab_dir
-split_csv "$SUBNET_IDS"
+split_csv "$PUBLIC_SUBNET_IDS"
 rows=$(aws ec2 describe-subnets --region "$AWS_REGION" --subnet-ids "${CSV_VALUES[@]}" --query 'Subnets[].join(`\t`,[AvailabilityZone,SubnetId])' --output text)
 (( $(printf '%s\n' "$rows" | sed '/^$/d' | wc -l | tr -d ' ') >= 2 )) || die "Could not discover at least two subnet availability zones"
 

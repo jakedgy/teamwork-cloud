@@ -24,7 +24,7 @@ pv_names=
 volume_ids=${PENDING_VOLUME_IDS//,/$'\n'}
 if (( cluster_exists == 1 )); then
   if [[ -z $CLUSTER_ARN ]]; then recover_cluster_identity; else verify_cluster_identity; fi
-  if ! phase_is_pre_helm; then
+  if phase_requires_kube_cleanup; then
     aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION" --kubeconfig "$KUBECONFIG_FILE"
     chmod 600 "$KUBECONFIG_FILE"
 
@@ -116,6 +116,7 @@ if [[ -n $NLB_HOSTNAME ]]; then
 fi
 
 if (( failed == 0 && cluster_exists == 1 )); then
+  advance_phase CLUSTER_DELETING
   verify_cluster_identity
   eksctl delete cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" --wait || failed=1
 fi

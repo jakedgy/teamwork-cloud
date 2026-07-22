@@ -152,6 +152,7 @@ cat >"$FAKE_BIN/helm" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'helm %s KUBECONFIG=%s\n' "$*" "${KUBECONFIG:-unset}" >>"$FAKE_CALLS"
+[[ "${FAKE_KUBE_API_UNAVAILABLE:-0}" != 1 ]] || { printf 'Kubernetes API unavailable\n' >&2; exit 98; }
 [[ "${KUBECONFIG:-}" == */.twc-lab/kubeconfig ]] || { printf 'unscoped helm command\n' >&2; exit 97; }
 case "${1:-} ${2:-}" in "repo add"|"repo update"|"upgrade --install"|"list --all-namespaces"|"uninstall twc-lab"|"uninstall ingress-nginx") ;; *) printf 'unexpected helm command: %s\n' "$*" >&2; exit 97 ;; esac
 if [[ "${1:-}" == list ]]; then
@@ -166,6 +167,7 @@ cat >"$FAKE_BIN/kubectl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'kubectl %s KUBECONFIG=%s\n' "$*" "${KUBECONFIG:-unset}" >>"$FAKE_CALLS"
+[[ "${FAKE_KUBE_API_UNAVAILABLE:-0}" != 1 ]] || { printf 'Kubernetes API unavailable\n' >&2; exit 98; }
 [[ "${KUBECONFIG:-}" == */.twc-lab/kubeconfig ]] || { printf 'unscoped kubectl command\n' >&2; exit 97; }
 if [[ "$*" == *"rollout status"* && "${FAKE_ROLLOUT_FAIL:-0}" == 1 ]]; then
   exit 1
@@ -314,7 +316,7 @@ PHASE=DEPLOYED
 DEPLOYMENT_ID=0123456789abcdef0123456789abcdef
 CLUSTER_ARN=arn:aws:eks:us-east-2:111122223333:cluster/twc-lab
 VPC_ID=vpc-123456
-SUBNET_IDS=subnet-a,subnet-b
+PUBLIC_SUBNET_IDS=subnet-a,subnet-b
 STACK_NAME=twc-lab-vpc
 VPC_STACK_ID=arn:aws:cloudformation:us-east-2:111122223333:stack/twc-lab-vpc/stack123
 PENDING_VOLUME_IDS=
@@ -343,28 +345,28 @@ new_case
 expect_fail "cluster lookup errors are not mistaken for absence" run_script preflight.sh FAKE_CLUSTER_ERROR=AccessDeniedException
 
 new_case
-expect_fail "existing mode requires two subnets" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 SUBNET_IDS=subnet-a
+expect_fail "existing mode requires two public subnets" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a
 
 new_case
-expect_fail "existing mode requires exactly one matching VPC" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 SUBNET_IDS=subnet-a,subnet-b $'FAKE_VPCS=vpc-123456\tvpc-other'
+expect_fail "existing mode requires exactly one matching VPC" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b $'FAKE_VPCS=vpc-123456\tvpc-other'
 
 new_case
-expect_fail "existing subnets must span AZs" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 SUBNET_IDS=subnet-a,subnet-b $'FAKE_SUBNET_ROWS=subnet-a\tus-east-2a\t32\tTrue\t1\nsubnet-b\tus-east-2a\t32\tTrue\t1'
+expect_fail "existing subnets must span AZs" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b $'FAKE_SUBNET_ROWS=subnet-a\tus-east-2a\t32\tTrue\t1\nsubnet-b\tus-east-2a\t32\tTrue\t1'
 
 new_case
-expect_fail "existing subnets need sixteen free IPs" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 SUBNET_IDS=subnet-a,subnet-b $'FAKE_SUBNET_ROWS=subnet-a\tus-east-2a\t15\tTrue\t1\nsubnet-b\tus-east-2b\t32\tTrue\t1'
+expect_fail "existing subnets need sixteen free IPs" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b $'FAKE_SUBNET_ROWS=subnet-a\tus-east-2a\t15\tTrue\t1\nsubnet-b\tus-east-2b\t32\tTrue\t1'
 
 new_case
-expect_fail "existing subnets map public IPs" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 SUBNET_IDS=subnet-a,subnet-b $'FAKE_SUBNET_ROWS=subnet-a\tus-east-2a\t32\tFalse\t1\nsubnet-b\tus-east-2b\t32\tTrue\t1'
+expect_fail "existing subnets map public IPs" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b $'FAKE_SUBNET_ROWS=subnet-a\tus-east-2a\t32\tFalse\t1\nsubnet-b\tus-east-2b\t32\tTrue\t1'
 
 new_case
-expect_fail "existing VPC has an IGW default route" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 SUBNET_IDS=subnet-a,subnet-b FAKE_SELECTED_ROUTE=None
+expect_fail "existing VPC has an IGW default route" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b FAKE_SELECTED_ROUTE=None
 
 new_case
-expect_fail "selected subnet cannot borrow an unrelated IGW route" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 SUBNET_IDS=subnet-a,subnet-b FAKE_EXPLICIT_ROUTE_TABLE_ID=rtb-selected FAKE_SELECTED_ROUTE=None FAKE_DEFAULT_ROUTES=igw-unrelated
+expect_fail "selected subnet cannot borrow an unrelated IGW route" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b FAKE_EXPLICIT_ROUTE_TABLE_ID=rtb-selected FAKE_SELECTED_ROUTE=None FAKE_DEFAULT_ROUTES=igw-unrelated
 
 new_case
-expect_fail "existing subnets carry public ELB role tags" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 SUBNET_IDS=subnet-a,subnet-b $'FAKE_SUBNET_ROWS=subnet-a\tus-east-2a\t32\tTrue\tNone\nsubnet-b\tus-east-2b\t32\tTrue\t1'
+expect_fail "existing subnets carry public ELB role tags" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b $'FAKE_SUBNET_ROWS=subnet-a\tus-east-2a\t32\tTrue\tNone\nsubnet-b\tus-east-2b\t32\tTrue\t1'
 
 new_case
 expect_ok "managed deploy succeeds with fake CLIs" run_script deploy.sh CONFIRM=1
@@ -375,7 +377,7 @@ if grep -Fq -- "--kubeconfig $CASE_DIR/.twc-lab/kubeconfig" "$CALLS" && ! grep -
 if [[ $(file_mode "$CASE_DIR/.twc-lab/state.env") == 600 ]]; then record "state file permissions are 0600" pass; else record "state file permissions are 0600" fail; fi
 if [[ $(file_mode "$CASE_DIR/.twc-lab/secrets.yaml") == 600 ]]; then record "secrets file permissions are 0600" pass; else record "secrets file permissions are 0600" fail; fi
 if grep -Eq '^secrets:$' "$CASE_DIR/.twc-lab/secrets.yaml" && grep -Eq '^  artemisPassword: "[0-9a-f]{32}"$' "$CASE_DIR/.twc-lab/secrets.yaml"; then record "secret uses the chart password key and 32 characters" pass; else record "secret uses the chart password key and 32 characters" fail; fi
-if [[ $(cut -d= -f1 "$CASE_DIR/.twc-lab/state.env" | tr '\n' ' ') == "ACCOUNT_ID AWS_REGION CLUSTER_NAME NETWORK_MODE PHASE DEPLOYMENT_ID CLUSTER_ARN VPC_ID SUBNET_IDS STACK_NAME VPC_STACK_ID PENDING_VOLUME_IDS FAILED_SERVICE NLB_HOSTNAME " ]]; then record "state contains only fixed keys" pass; else record "state contains only fixed keys" fail; fi
+if [[ $(cut -d= -f1 "$CASE_DIR/.twc-lab/state.env" | tr '\n' ' ') == "ACCOUNT_ID AWS_REGION CLUSTER_NAME NETWORK_MODE PHASE DEPLOYMENT_ID CLUSTER_ARN VPC_ID PUBLIC_SUBNET_IDS STACK_NAME VPC_STACK_ID PENDING_VOLUME_IDS FAILED_SERVICE NLB_HOSTNAME " ]]; then record "state contains only fixed keys" pass; else record "state contains only fixed keys" fail; fi
 if grep -q '^DEPLOYMENT_ID=' "$CASE_DIR/.twc-lab/state.env" && grep -q '^CLUSTER_ARN=' "$CASE_DIR/.twc-lab/state.env" && grep -q '^VPC_STACK_ID=' "$CASE_DIR/.twc-lab/state.env"; then record "state records deployment, cluster, and stack identities" pass; else record "state records deployment, cluster, and stack identities" fail; fi
 if grep -q '^PHASE=DEPLOYED$' "$CASE_DIR/.twc-lab/state.env" && grep -q '^PENDING_VOLUME_IDS=$' "$CASE_DIR/.twc-lab/state.env"; then record "deployed state records lifecycle phase and pending storage" pass; else record "deployed state records lifecycle phase and pending storage" fail; fi
 if grep -Fq 'DeploymentId=0123456789abcdef0123456789abcdef' "$CALLS" && grep -Fq 'twc-lab:deployment-id=0123456789abcdef0123456789abcdef' "$CALLS"; then record "deployment identity tags both stack and cluster" pass; else record "deployment identity tags both stack and cluster" fail; fi
@@ -397,13 +399,28 @@ expect_fail "managed deploy stops when stack lookup is unauthorized" run_script 
 assert_no_call "stack lookup error prevents CloudFormation mutation" "aws cloudformation deploy"
 
 new_case
-expect_ok "existing deploy succeeds with validated network" run_script deploy.sh NETWORK_MODE=existing VPC_ID=vpc-123456 SUBNET_IDS=subnet-a,subnet-b CONFIRM=1
+expect_ok "documented PUBLIC_SUBNET_IDS deploy succeeds" run_script deploy.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b CONFIRM=1
 assert_no_call "existing deploy never mutates CloudFormation" "aws cloudformation deploy"
 expect_ok "existing deploy reuses its recorded state without repeated flags" run_script deploy.sh CONFIRM=1
 assert_no_call "recorded existing mode still never mutates CloudFormation" "aws cloudformation deploy"
 : >"$CALLS"
-expect_fail "tracked deployment rejects conflicting network overrides" run_script deploy.sh NETWORK_MODE=existing VPC_ID=vpc-other SUBNET_IDS=subnet-x,subnet-y CONFIRM=1
+expect_fail "tracked deployment rejects conflicting network overrides" run_script deploy.sh NETWORK_MODE=existing VPC_ID=vpc-other PUBLIC_SUBNET_IDS=subnet-x,subnet-y CONFIRM=1
 if grep -Fq 'VPC_ID=vpc-123456' "$CASE_DIR/.twc-lab/state.env"; then record "conflicting rerun preserves tracked network identity" pass; else record "conflicting rerun preserves tracked network identity" fail; fi
+
+new_case
+expect_ok "legacy SUBNET_IDS deploy remains compatible" run_script deploy.sh NETWORK_MODE=existing VPC_ID=vpc-123456 SUBNET_IDS=subnet-a,subnet-b CONFIRM=1
+if grep -q '^PUBLIC_SUBNET_IDS=subnet-a,subnet-b$' "$CASE_DIR/.twc-lab/state.env" && ! grep -q '^SUBNET_IDS=' "$CASE_DIR/.twc-lab/state.env"; then record "legacy subnet input migrates to canonical state" pass; else record "legacy subnet input migrates to canonical state" fail; fi
+
+new_case
+write_state existing
+sed 's/^PUBLIC_SUBNET_IDS=/SUBNET_IDS=/' "$CASE_DIR/.twc-lab/state.env" >"$CASE_DIR/.twc-lab/state.env.new"
+mv "$CASE_DIR/.twc-lab/state.env.new" "$CASE_DIR/.twc-lab/state.env"
+expect_ok "legacy subnet state remains compatible" run_script deploy.sh CONFIRM=1
+if grep -q '^PUBLIC_SUBNET_IDS=subnet-a,subnet-b$' "$CASE_DIR/.twc-lab/state.env" && ! grep -q '^SUBNET_IDS=' "$CASE_DIR/.twc-lab/state.env"; then record "legacy subnet state migrates on write" pass; else record "legacy subnet state migrates on write" fail; fi
+
+new_case
+expect_fail "conflicting public and legacy subnet inputs fail closed" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b SUBNET_IDS=subnet-x,subnet-y
+assert_no_call "subnet alias conflict is rejected before AWS" "aws "
 
 new_case
 expect_fail "failure demo rejects services outside allowlist" run_script demo-failure.sh SERVICE=postgres CONFIRM=1
@@ -440,9 +457,9 @@ if [[ ! -e "$CASE_DIR/executed" ]]; then record "state parser never executes val
 new_case
 write_state managed
 expect_ok "status emits JSON with live operational layers" run_script status.sh JSON=1 FAKE_NLB_HOST=live.example.test
-if ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' "$TEST_ROOT/out" && grep -Fq '"phase":"DEPLOYED"' "$TEST_ROOT/out" && grep -Fq '"pendingVolumeIds":""' "$TEST_ROOT/out" && grep -Fq '"helmReleases":' "$TEST_ROOT/out" && grep -Fq '"pods":' "$TEST_ROOT/out" && grep -Fq '"pvcs":' "$TEST_ROOT/out" && grep -Fq '"ingressHostname":"live.example.test"' "$TEST_ROOT/out" && grep -Fq '"simulatorHealth":' "$TEST_ROOT/out" && grep -Fq '"layerExplanation":' "$TEST_ROOT/out"; then record "JSON status includes every required operational layer" pass; else record "JSON status includes every required operational layer" fail; fi
+if ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' "$TEST_ROOT/out" && grep -Fq '"phase":"DEPLOYED"' "$TEST_ROOT/out" && grep -Fq '"publicSubnetIds":"subnet-a,subnet-b"' "$TEST_ROOT/out" && grep -Fq '"pendingVolumeIds":""' "$TEST_ROOT/out" && grep -Fq '"helmReleases":' "$TEST_ROOT/out" && grep -Fq '"pods":' "$TEST_ROOT/out" && grep -Fq '"pvcs":' "$TEST_ROOT/out" && grep -Fq '"ingressHostname":"live.example.test"' "$TEST_ROOT/out" && grep -Fq '"simulatorHealth":' "$TEST_ROOT/out" && grep -Fq '"layerExplanation":' "$TEST_ROOT/out"; then record "JSON status includes every required operational layer" pass; else record "JSON status includes every required operational layer" fail; fi
 expect_ok "status emits a human operational summary" run_script status.sh FAKE_NLB_HOST=live.example.test
-if grep -Fq 'Phase:          DEPLOYED' "$TEST_ROOT/out" && grep -Fq 'Pending volumes: none' "$TEST_ROOT/out" && grep -Fq 'Helm releases:' "$TEST_ROOT/out" && grep -Fq 'Pods:' "$TEST_ROOT/out" && grep -Fq 'PVCs:' "$TEST_ROOT/out" && grep -Fq 'Ingress:' "$TEST_ROOT/out" && grep -Fq 'Simulator health:' "$TEST_ROOT/out" && grep -Fq 'Layers:' "$TEST_ROOT/out"; then record "human status includes every required operational layer" pass; else record "human status includes every required operational layer" fail; fi
+if grep -Fq 'Phase:          DEPLOYED' "$TEST_ROOT/out" && grep -Fq 'Public subnets: subnet-a,subnet-b' "$TEST_ROOT/out" && grep -Fq 'Pending volumes: none' "$TEST_ROOT/out" && grep -Fq 'Helm releases:' "$TEST_ROOT/out" && grep -Fq 'Pods:' "$TEST_ROOT/out" && grep -Fq 'PVCs:' "$TEST_ROOT/out" && grep -Fq 'Ingress:' "$TEST_ROOT/out" && grep -Fq 'Simulator health:' "$TEST_ROOT/out" && grep -Fq 'Layers:' "$TEST_ROOT/out"; then record "human status includes every required operational layer" pass; else record "human status includes every required operational layer" fail; fi
 
 new_case
 write_state managed
@@ -524,6 +541,11 @@ new_case
 write_state managed
 expect_fail "cleanup reports cluster deletion failure" run_script destroy.sh CONFIRM=1 FAKE_CLUSTER_DELETE_FAIL=1
 if [[ -f "$CASE_DIR/.twc-lab/state.env" ]]; then record "state survives partial cleanup failure" pass; else record "state survives partial cleanup failure" fail; fi
+if grep -q '^PHASE=CLUSTER_DELETING$' "$CASE_DIR/.twc-lab/state.env"; then record "completed Kubernetes cleanup records cluster deletion phase" pass; else record "completed Kubernetes cleanup records cluster deletion phase" fail; fi
+: >"$CALLS"
+expect_ok "cluster deletion retry survives unavailable Kubernetes API" run_script destroy.sh CONFIRM=1 FAKE_KUBE_API_UNAVAILABLE=1
+assert_no_call "cluster deletion retry bypasses completed Kubernetes cleanup" "kubectl "
+assert_no_call "cluster deletion retry bypasses completed Helm cleanup" "helm "
 
 new_case
 write_state managed
@@ -541,6 +563,7 @@ new_case
 write_state managed
 expect_fail "NLB lookup error blocks cleanup" run_script destroy.sh CONFIRM=1 FAKE_NLB_LOOKUP_ERROR=1
 if [[ -f "$CASE_DIR/.twc-lab/state.env" ]]; then record "NLB lookup error preserves state" pass; else record "NLB lookup error preserves state" fail; fi
+if grep -q '^PHASE=DEPLOYED$' "$CASE_DIR/.twc-lab/state.env"; then record "incomplete cleanup cannot enter cluster deletion phase" pass; else record "incomplete cleanup cannot enter cluster deletion phase" fail; fi
 assert_no_call "NLB lookup error prevents cluster deletion" "eksctl delete cluster"
 assert_no_call "NLB lookup error preserves managed VPC stack" "aws cloudformation delete-stack"
 

@@ -65,11 +65,11 @@ load_state() {
   [[ -f $STATE_FILE ]] || die "State file not found: $STATE_FILE"
   local key value
   ACCOUNT_ID= AWS_REGION= CLUSTER_NAME= NETWORK_MODE= PHASE= DEPLOYMENT_ID= CLUSTER_ARN=
-  VPC_ID= SUBNET_IDS= STACK_NAME= VPC_STACK_ID= PENDING_VOLUME_IDS= FAILED_SERVICE= NLB_HOSTNAME=
+  VPC_ID= PUBLIC_SUBNET_IDS= SUBNET_IDS= STACK_NAME= VPC_STACK_ID= PENDING_VOLUME_IDS= FAILED_SERVICE= NLB_HOSTNAME=
   while IFS='=' read -r key value || [[ -n ${key:-} ]]; do
     [[ -n ${key:-} ]] || continue
     case "$key" in
-      ACCOUNT_ID|AWS_REGION|CLUSTER_NAME|NETWORK_MODE|PHASE|DEPLOYMENT_ID|CLUSTER_ARN|VPC_ID|SUBNET_IDS|STACK_NAME|VPC_STACK_ID|PENDING_VOLUME_IDS|FAILED_SERVICE|NLB_HOSTNAME)
+      ACCOUNT_ID|AWS_REGION|CLUSTER_NAME|NETWORK_MODE|PHASE|DEPLOYMENT_ID|CLUSTER_ARN|VPC_ID|PUBLIC_SUBNET_IDS|SUBNET_IDS|STACK_NAME|VPC_STACK_ID|PENDING_VOLUME_IDS|FAILED_SERVICE|NLB_HOSTNAME)
         [[ $value != *$'\n'* && $value != *$'\r'* ]] || die "Invalid newline in state value"
         printf -v "$key" '%s' "$value"
         ;;
@@ -82,6 +82,7 @@ load_state() {
   validate_cluster_name "$CLUSTER_NAME"
   validate_network_mode "$NETWORK_MODE"
   validate_phase "$PHASE"
+  resolve_public_subnet_ids
   [[ $DEPLOYMENT_ID =~ ^[a-f0-9]{32}$ ]] || die "State contains an invalid deployment ID"
   [[ -z $CLUSTER_ARN ]] || validate_cluster_arn "$CLUSTER_ARN"
   [[ -z $VPC_STACK_ID ]] || validate_stack_id "$VPC_STACK_ID"
@@ -97,8 +98,8 @@ load_state() {
   if [[ -n $VPC_ID ]]; then
     [[ $VPC_ID =~ ^vpc-[A-Za-z0-9]+$ ]] || die "State contains an invalid VPC ID"
   fi
-  if [[ -n $SUBNET_IDS ]]; then
-    split_csv "$SUBNET_IDS"
+  if [[ -n $PUBLIC_SUBNET_IDS ]]; then
+    split_csv "$PUBLIC_SUBNET_IDS"
     (( ${#CSV_VALUES[@]} >= 2 )) || die "State must contain at least two subnet IDs"
     local subnet
     for subnet in "${CSV_VALUES[@]}"; do
@@ -106,7 +107,7 @@ load_state() {
     done
   fi
   if [[ $NETWORK_MODE == existing ]]; then
-    [[ -n $VPC_ID && -n $SUBNET_IDS ]] || die "Existing-network state is incomplete"
+    [[ -n $VPC_ID && -n $PUBLIC_SUBNET_IDS ]] || die "Existing-network state is incomplete"
   fi
   case "$FAILED_SERVICE" in
     ''|cassandra|zookeeper|artemis) ;;
@@ -132,7 +133,7 @@ write_state() {
     printf 'DEPLOYMENT_ID=%s\n' "$DEPLOYMENT_ID"
     printf 'CLUSTER_ARN=%s\n' "${CLUSTER_ARN:-}"
     printf 'VPC_ID=%s\n' "${VPC_ID:-}"
-    printf 'SUBNET_IDS=%s\n' "${SUBNET_IDS:-}"
+    printf 'PUBLIC_SUBNET_IDS=%s\n' "${PUBLIC_SUBNET_IDS:-}"
     printf 'STACK_NAME=%s\n' "${STACK_NAME:-}"
     printf 'VPC_STACK_ID=%s\n' "${VPC_STACK_ID:-}"
     printf 'PENDING_VOLUME_IDS=%s\n' "${PENDING_VOLUME_IDS:-}"
@@ -145,7 +146,7 @@ write_state() {
 
 validate_phase() {
   case "$1" in
-    INITIALIZED|NETWORK_READY|CLUSTER_CREATING|CLUSTER_READY|HELM_STARTED|DEPLOYED) ;;
+    INITIALIZED|NETWORK_READY|CLUSTER_CREATING|CLUSTER_READY|HELM_STARTED|DEPLOYED|CLUSTER_DELETING) ;;
     *) die "State contains an invalid lifecycle phase" ;;
   esac
 }
@@ -158,6 +159,7 @@ phase_rank() {
     CLUSTER_READY) printf '3\n' ;;
     HELM_STARTED) printf '4\n' ;;
     DEPLOYED) printf '5\n' ;;
+    CLUSTER_DELETING) printf '6\n' ;;
     *) die "Unknown lifecycle phase: $1" ;;
   esac
 }
@@ -173,8 +175,21 @@ advance_phase() {
   fi
 }
 
-phase_is_pre_helm() {
-  (( $(phase_rank "$PHASE") < $(phase_rank HELM_STARTED) ))
+phase_requires_kube_cleanup() {
+  case "$PHASE" in
+    HELM_STARTED|DEPLOYED) return 0 ;;
+    INITIALIZED|NETWORK_READY|CLUSTER_CREATING|CLUSTER_READY|CLUSTER_DELETING) return 1 ;;
+    *) die "Unknown lifecycle phase: $PHASE" ;;
+  esac
+}
+
+resolve_public_subnet_ids() {
+  PUBLIC_SUBNET_IDS=${PUBLIC_SUBNET_IDS:-}
+  SUBNET_IDS=${SUBNET_IDS:-}
+  if [[ -n $PUBLIC_SUBNET_IDS && -n $SUBNET_IDS && $PUBLIC_SUBNET_IDS != "$SUBNET_IDS" ]]; then
+    die "PUBLIC_SUBNET_IDS conflicts with legacy SUBNET_IDS"
+  fi
+  PUBLIC_SUBNET_IDS=${PUBLIC_SUBNET_IDS:-$SUBNET_IDS}
 }
 
 validate_cluster_arn() {

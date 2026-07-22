@@ -8,7 +8,9 @@ AWS_REGION=${AWS_REGION:-us-east-2}
 CLUSTER_NAME=${CLUSTER_NAME:-twc-lab}
 NETWORK_MODE=${NETWORK_MODE:-managed}
 VPC_ID=${VPC_ID:-}
+PUBLIC_SUBNET_IDS=${PUBLIC_SUBNET_IDS:-}
 SUBNET_IDS=${SUBNET_IDS:-}
+resolve_public_subnet_ids
 
 # These checks intentionally precede any external command, especially AWS.
 validate_network_mode "$NETWORK_MODE"
@@ -18,8 +20,8 @@ if [[ $NETWORK_MODE == managed ]]; then validate_stack_name "${CLUSTER_NAME}-vpc
 if [[ $NETWORK_MODE == existing ]]; then
   [[ -n $VPC_ID ]] || die "VPC_ID is required in existing mode"
   [[ $VPC_ID =~ ^vpc-[A-Za-z0-9]+$ ]] || die "Invalid VPC_ID"
-  [[ -n $SUBNET_IDS ]] || die "SUBNET_IDS is required in existing mode"
-  split_csv "$SUBNET_IDS"
+  [[ -n $PUBLIC_SUBNET_IDS ]] || die "PUBLIC_SUBNET_IDS is required in existing mode"
+  split_csv "$PUBLIC_SUBNET_IDS"
   (( ${#CSV_VALUES[@]} >= 2 )) || die "At least two public subnet IDs are required"
 fi
 
@@ -63,7 +65,7 @@ if [[ $NETWORK_MODE == existing ]]; then
   read -r -a found_vpcs <<<"$vpcs"
   (( ${#found_vpcs[@]} == 1 )) && [[ ${found_vpcs[0]} == "$VPC_ID" ]] || die "VPC_ID must resolve to exactly one VPC"
 
-  split_csv "$SUBNET_IDS"
+  split_csv "$PUBLIC_SUBNET_IDS"
   rows=$(aws ec2 describe-subnets --region "$AWS_REGION" --subnet-ids "${CSV_VALUES[@]}" --filters "Name=vpc-id,Values=$VPC_ID" --query "Subnets[].join(\`\\t\`,[SubnetId,AvailabilityZone,to_string(AvailableIpAddressCount),to_string(MapPublicIpOnLaunch),not_null(Tags[?Key=='kubernetes.io/role/elb']|[0].Value, \`None\`)])" --output text)
   requested_count=${#CSV_VALUES[@]}
   seen_count=0

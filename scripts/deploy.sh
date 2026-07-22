@@ -11,7 +11,13 @@ requested_region_set=${AWS_REGION+x}; requested_region=${AWS_REGION:-}
 requested_cluster_set=${CLUSTER_NAME+x}; requested_cluster=${CLUSTER_NAME:-}
 requested_mode_set=${NETWORK_MODE+x}; requested_mode=${NETWORK_MODE:-}
 requested_vpc_set=${VPC_ID+x}; requested_vpc=${VPC_ID:-}
-requested_subnets_set=${SUBNET_IDS+x}; requested_subnets=${SUBNET_IDS:-}
+requested_public_subnets_set=${PUBLIC_SUBNET_IDS+x}; requested_public_subnets=${PUBLIC_SUBNET_IDS:-}
+requested_legacy_subnets_set=${SUBNET_IDS+x}; requested_legacy_subnets=${SUBNET_IDS:-}
+if [[ -n $requested_public_subnets_set && -n $requested_legacy_subnets_set && $requested_public_subnets != "$requested_legacy_subnets" ]]; then
+  die "PUBLIC_SUBNET_IDS conflicts with legacy SUBNET_IDS"
+fi
+requested_subnets_set=${requested_public_subnets_set:-$requested_legacy_subnets_set}
+requested_subnets=${requested_public_subnets:-$requested_legacy_subnets}
 if [[ -f $STATE_FILE ]]; then
   load_state
   had_state=1
@@ -19,14 +25,17 @@ if [[ -f $STATE_FILE ]]; then
   [[ -z $requested_cluster_set || $requested_cluster == "$CLUSTER_NAME" ]] || die "CLUSTER_NAME conflicts with tracked state"
   [[ -z $requested_mode_set || $requested_mode == "$NETWORK_MODE" ]] || die "NETWORK_MODE conflicts with tracked state"
   [[ -z $requested_vpc_set || $requested_vpc == "$VPC_ID" ]] || die "VPC_ID conflicts with tracked state"
-  [[ -z $requested_subnets_set || $requested_subnets == "$SUBNET_IDS" ]] || die "SUBNET_IDS conflicts with tracked state"
+  [[ -z $requested_subnets_set || $requested_subnets == "$PUBLIC_SUBNET_IDS" ]] || die "PUBLIC_SUBNET_IDS conflicts with tracked state"
+  [[ $PHASE != CLUSTER_DELETING ]] || die "Cluster deletion is in progress; run destroy to resume cleanup"
 fi
 AWS_REGION=${AWS_REGION:-us-east-2}
 CLUSTER_NAME=${CLUSTER_NAME:-twc-lab}
 NETWORK_MODE=${NETWORK_MODE:-managed}
 PHASE=${PHASE:-INITIALIZED}
 VPC_ID=${VPC_ID:-}
+PUBLIC_SUBNET_IDS=${PUBLIC_SUBNET_IDS:-}
 SUBNET_IDS=${SUBNET_IDS:-}
+resolve_public_subnet_ids
 STACK_NAME="${CLUSTER_NAME}-vpc"
 DEPLOYMENT_ID=${DEPLOYMENT_ID:-}
 CLUSTER_ARN=${CLUSTER_ARN:-}
@@ -35,7 +44,7 @@ PENDING_VOLUME_IDS=${PENDING_VOLUME_IDS:-}
 FAILED_SERVICE=${FAILED_SERVICE:-}
 NLB_HOSTNAME=${NLB_HOSTNAME:-}
 
-AWS_REGION="$AWS_REGION" CLUSTER_NAME="$CLUSTER_NAME" NETWORK_MODE="$NETWORK_MODE" VPC_ID="$VPC_ID" SUBNET_IDS="$SUBNET_IDS" "$SCRIPT_DIR/preflight.sh"
+AWS_REGION="$AWS_REGION" CLUSTER_NAME="$CLUSTER_NAME" NETWORK_MODE="$NETWORK_MODE" VPC_ID="$VPC_ID" PUBLIC_SUBNET_IDS="$PUBLIC_SUBNET_IDS" "$SCRIPT_DIR/preflight.sh"
 ACCOUNT_ID=$(current_account)
 
 if (( had_state == 0 )); then
@@ -75,8 +84,8 @@ if [[ $NETWORK_MODE == managed ]]; then
     die "Unable to verify whether CloudFormation stack $STACK_NAME exists"
   fi
   VPC_ID=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" --query "Stacks[0].Outputs[?OutputKey=='VpcId'].OutputValue | [0]" --output text)
-  SUBNET_IDS=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" --query "Stacks[0].Outputs[?OutputKey=='PublicSubnetIds'].OutputValue | [0]" --output text)
-  [[ $VPC_ID == vpc-* && $SUBNET_IDS == subnet-* ]] || die "Managed stack has no usable outputs; state is preserved for scoped destroy"
+  PUBLIC_SUBNET_IDS=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" --query "Stacks[0].Outputs[?OutputKey=='PublicSubnetIds'].OutputValue | [0]" --output text)
+  [[ $VPC_ID == vpc-* && $PUBLIC_SUBNET_IDS == subnet-* ]] || die "Managed stack has no usable outputs; state is preserved for scoped destroy"
 else
   STACK_NAME=
   VPC_STACK_ID=

@@ -29,17 +29,17 @@ if [[ ${JSON:-0} == 1 ]]; then
   printf '%s' "$helm_releases" | jq -c \
     --arg account "$ACCOUNT_ID" --arg region "$AWS_REGION" --arg cluster "$CLUSTER_NAME" \
     --arg clusterStatus "$cluster_status" --arg phase "$PHASE" --arg networkMode "$NETWORK_MODE" --arg vpc "$VPC_ID" \
-    --arg subnets "$SUBNET_IDS" --arg pods "$pods" --arg pvcs "$pvcs" \
+    --arg publicSubnetIds "$PUBLIC_SUBNET_IDS" --arg pods "$pods" --arg pvcs "$pvcs" \
     --arg ingressHostname "$ingress_hostname" --arg simulatorHealth "$simulator_health" \
     --arg failedService "$FAILED_SERVICE" --arg pendingVolumeIds "$PENDING_VOLUME_IDS" --arg layerExplanation "$layer_explanation" \
-    '{account:$account,region:$region,cluster:$cluster,clusterStatus:$clusterStatus,phase:$phase,networkMode:$networkMode,vpc:$vpc,subnets:$subnets,helmReleases:.,pods:$pods,pvcs:$pvcs,ingressHostname:$ingressHostname,simulatorHealth:$simulatorHealth,failedService:$failedService,pendingVolumeIds:$pendingVolumeIds,layerExplanation:$layerExplanation}'
+    '{account:$account,region:$region,cluster:$cluster,clusterStatus:$clusterStatus,phase:$phase,networkMode:$networkMode,vpc:$vpc,publicSubnetIds:$publicSubnetIds,helmReleases:.,pods:$pods,pvcs:$pvcs,ingressHostname:$ingressHostname,simulatorHealth:$simulatorHealth,failedService:$failedService,pendingVolumeIds:$pendingVolumeIds,layerExplanation:$layerExplanation}'
 else
   printf 'Account:        %s\n' "$ACCOUNT_ID"
   printf 'Region:         %s\n' "$AWS_REGION"
   printf 'Cluster:        %s (%s)\n' "$CLUSTER_NAME" "$cluster_status"
   printf 'Phase:          %s\n' "$PHASE"
   printf 'Network:        %s (%s)\n' "$NETWORK_MODE" "$VPC_ID"
-  printf 'Subnets:        %s\n' "$SUBNET_IDS"
+  printf 'Public subnets: %s\n' "$PUBLIC_SUBNET_IDS"
   printf 'Helm releases:  %s\n' "$helm_releases"
   printf 'Pods:           %s\n' "${pods:-none}"
   printf 'PVCs:           %s\n' "${pvcs:-none}"

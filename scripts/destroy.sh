@@ -34,7 +34,11 @@ fi
 if [[ -n $NLB_HOSTNAME ]]; then
   nlb_deadline=$((SECONDS + ${NLB_WAIT_SECONDS:-900}))
   while (( SECONDS < nlb_deadline )); do
-    nlb_arns=$(aws elbv2 describe-load-balancers --region "$AWS_REGION" --query "LoadBalancers[?DNSName=='$NLB_HOSTNAME'].LoadBalancerArn" --output text 2>/dev/null || true)
+    if ! nlb_arns=$(aws elbv2 describe-load-balancers --region "$AWS_REGION" --query "LoadBalancers[?DNSName=='$NLB_HOSTNAME'].LoadBalancerArn" --output text); then
+      log "Unable to confirm deletion of ingress load balancer $NLB_HOSTNAME"
+      failed=1
+      break
+    fi
     [[ -z $nlb_arns || $nlb_arns == None ]] && break
     sleep "${POLL_SECONDS:-10}"
   done
@@ -46,8 +50,18 @@ if (( failed == 0 && cluster_exists == 1 )); then
 fi
 
 if (( failed == 0 )); then
-  residual_elbs=$(aws resourcegroupstaggingapi get-resources --region "$AWS_REGION" --resource-type-filters elasticloadbalancing:loadbalancer --tag-filters "Key=elbv2.k8s.aws/cluster,Values=$CLUSTER_NAME" --query 'ResourceTagMappingList[].ResourceARN' --output text)
-  residual_volumes=$(aws ec2 describe-volumes --region "$AWS_REGION" --filters "Name=tag:kubernetes.io/cluster/$CLUSTER_NAME,Values=owned,shared" --query 'Volumes[].VolumeId' --output text)
+  all_elb_arns=$(aws elbv2 describe-load-balancers --region "$AWS_REGION" --query 'LoadBalancers[].LoadBalancerArn' --output text)
+  residual_elbs=
+  if [[ -n $all_elb_arns && $all_elb_arns != None ]]; then
+    read -r -a elb_arns <<<"$all_elb_arns"
+    for elb_arn in "${elb_arns[@]}"; do
+      tagged_arn=$(aws elbv2 describe-tags --region "$AWS_REGION" --resource-arns "$elb_arn" --query "TagDescriptions[?Tags[?Key=='eks:eks-cluster-name' && Value=='$CLUSTER_NAME']].ResourceArn" --output text)
+      if [[ -n $tagged_arn && $tagged_arn != None ]]; then
+        residual_elbs="${residual_elbs}${residual_elbs:+,}${tagged_arn}"
+      fi
+    done
+  fi
+  residual_volumes=$(aws ec2 describe-volumes --region "$AWS_REGION" --filters "Name=tag:eks:eks-cluster-name,Values=$CLUSTER_NAME" --query 'Volumes[].VolumeId' --output text)
   [[ -z $residual_elbs || $residual_elbs == None ]] || { log "Residual load balancers: $residual_elbs"; failed=1; }
   [[ -z $residual_volumes || $residual_volumes == None ]] || { log "Residual EBS volumes: $residual_volumes"; failed=1; }
 fi

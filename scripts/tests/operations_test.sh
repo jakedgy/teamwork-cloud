@@ -58,7 +58,18 @@ case "${1:-} ${2:-}" in
     ;;
   "cloudformation delete-stack") ;;
   "cloudformation wait") [[ "${FAKE_STACK_DELETE_FAIL:-0}" != 1 ]] ;;
-  "elbv2 describe-load-balancers") printf '%s\n' "${FAKE_RESIDUAL_ELBS:-None}" ;;
+  "elbv2 describe-load-balancers")
+    if [[ "$*" == *"DNSName=="* ]]; then
+      if [[ "${FAKE_NLB_LOOKUP_ERROR:-0}" == 1 ]]; then
+        printf 'AccessDeniedException\n' >&2
+        exit 254
+      fi
+      printf '%s\n' "${FAKE_NLB_ARNS:-None}"
+    else
+      printf '%s\n' "${FAKE_ALL_ELB_ARNS:-None}"
+    fi
+    ;;
+  "elbv2 describe-tags") printf '%s\n' "${FAKE_RESIDUAL_ELBS:-None}" ;;
   "ec2 describe-volumes") printf '%s\n' "${FAKE_RESIDUAL_VOLUMES:-None}" ;;
   *) ;;
 esac
@@ -337,6 +348,11 @@ if grep -Fq 'Helm releases:' "$TEST_ROOT/out" && grep -Fq 'Pods:' "$TEST_ROOT/ou
 
 new_case
 write_state managed
+expect_ok "status survives an unauthorized cluster lookup" run_script status.sh JSON=1 FAKE_CLUSTER_ERROR=AccessDeniedException
+if grep -Fq '"clusterStatus":"UNKNOWN"' "$TEST_ROOT/out"; then record "status does not misreport lookup errors as absent" pass; else record "status does not misreport lookup errors as absent" fail; fi
+
+new_case
+write_state managed
 expect_ok "allowed failure can be demonstrated" run_script demo-failure.sh SERVICE=artemis CONFIRM=1
 if grep -Fq 'kubectl scale statefulset twc-lab-artemis --replicas=0' "$CALLS"; then record "failure scales the exact StatefulSet to zero" pass; else record "failure scales the exact StatefulSet to zero" fail; fi
 expect_ok "recorded failure can be restored" run_script demo-restore.sh CONFIRM=1
@@ -386,6 +402,25 @@ new_case
 write_state managed
 expect_fail "cleanup reports cluster deletion failure" run_script destroy.sh CONFIRM=1 FAKE_CLUSTER_DELETE_FAIL=1
 if [[ -f "$CASE_DIR/.twc-lab/state.env" ]]; then record "state survives partial cleanup failure" pass; else record "state survives partial cleanup failure" fail; fi
+
+new_case
+write_state managed
+expect_fail "Auto Mode ELB residual blocks cleanup" run_script destroy.sh CONFIRM=1 FAKE_ALL_ELB_ARNS=arn:aws:elasticloadbalancing:us-east-2:111122223333:loadbalancer/net/auto/123 FAKE_RESIDUAL_ELBS=arn:aws:elasticloadbalancing:us-east-2:111122223333:loadbalancer/net/auto/123
+if grep -Fq "eks:eks-cluster-name" "$CALLS" && [[ -f "$CASE_DIR/.twc-lab/state.env" ]]; then record "Auto Mode ELB ARN is detected and state preserved" pass; else record "Auto Mode ELB ARN is detected and state preserved" fail; fi
+assert_no_call "ELB residual preserves managed VPC stack" "aws cloudformation delete-stack"
+
+new_case
+write_state managed
+expect_fail "Auto Mode EBS residual blocks cleanup" run_script destroy.sh CONFIRM=1 FAKE_RESIDUAL_VOLUMES=vol-auto123
+if grep -Fq "Name=tag:eks:eks-cluster-name,Values=twc-lab" "$CALLS" && [[ -f "$CASE_DIR/.twc-lab/state.env" ]]; then record "Auto Mode EBS volume is detected and state preserved" pass; else record "Auto Mode EBS volume is detected and state preserved" fail; fi
+assert_no_call "EBS residual preserves managed VPC stack" "aws cloudformation delete-stack"
+
+new_case
+write_state managed
+expect_fail "NLB lookup error blocks cleanup" run_script destroy.sh CONFIRM=1 FAKE_NLB_LOOKUP_ERROR=1
+if [[ -f "$CASE_DIR/.twc-lab/state.env" ]]; then record "NLB lookup error preserves state" pass; else record "NLB lookup error preserves state" fail; fi
+assert_no_call "NLB lookup error prevents cluster deletion" "eksctl delete cluster"
+assert_no_call "NLB lookup error preserves managed VPC stack" "aws cloudformation delete-stack"
 
 printf '%s passed, %s failed\n' "$pass" "$fail"
 (( fail == 0 ))

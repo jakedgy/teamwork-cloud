@@ -7,7 +7,14 @@ require_commands aws helm kubectl
 load_state
 verify_current_account
 
-cluster_status=$(aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" --query 'cluster.status' --output text 2>/dev/null || printf 'NOT_FOUND')
+if cluster_lookup=$(aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" --query 'cluster.status' --output text 2>&1); then
+  cluster_status=$cluster_lookup
+elif [[ $cluster_lookup == *ResourceNotFoundException* ]]; then
+  cluster_status=NOT_FOUND
+else
+  cluster_status=UNKNOWN
+  log "Unable to query EKS cluster status"
+fi
 helm_releases=$(helm list --all-namespaces --filter '^(twc-lab|ingress-nginx)$' --output json 2>/dev/null || printf '[]')
 pods=$(kubectl get pods --namespace twc-lab --output name 2>/dev/null | tr '\n' ',' | sed 's/,$//' || true)
 pvcs=$(kubectl get persistentvolumeclaims --namespace twc-lab --output name 2>/dev/null | tr '\n' ',' | sed 's/,$//' || true)

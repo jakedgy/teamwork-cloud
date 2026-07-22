@@ -1,0 +1,8 @@
+The Teamwork Cloud lab simulator has been installed.
+
+Wait for the nginx controller's external address, then open:
+
+  http://<external-address>/webapp
+
+The Artemis password is intentionally required at install time. Keep it out of
+values files and supply it with a secret values source.

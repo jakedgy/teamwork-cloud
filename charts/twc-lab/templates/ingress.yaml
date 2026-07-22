@@ -1,0 +1,36 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "twc-lab.fullname" . }}
+  labels:
+    {{- include "twc-lab.labels" . | nindent 4 }}
+  annotations:
+    nginx.ingress.kubernetes.io/affinity: cookie
+    nginx.ingress.kubernetes.io/session-cookie-name: twc-lab-affinity
+    nginx.ingress.kubernetes.io/session-cookie-samesite: Lax
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /webapp
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "twc-lab.fullname" . }}-simulator
+                port:
+                  number: 8080
+          - path: /authentication
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "twc-lab.fullname" . }}-simulator
+                port:
+                  number: 8080
+          - path: /admin
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "twc-lab.fullname" . }}-simulator
+                port:
+                  number: 8080

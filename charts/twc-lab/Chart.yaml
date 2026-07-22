@@ -1,0 +1,6 @@
+apiVersion: v2
+name: twc-lab
+description: Clean-room Teamwork Cloud lab simulator and backing services
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

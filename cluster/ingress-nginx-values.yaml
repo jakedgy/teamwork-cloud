@@ -1,0 +1,7 @@
+controller:
+  service:
+    type: LoadBalancer
+    loadBalancerClass: eks.amazonaws.com/nlb
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+      service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip

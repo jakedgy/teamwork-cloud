@@ -1,0 +1,65 @@
+clusterName: twc-lab
+awsRegion: us-east-2
+
+storageClass:
+  name: auto-ebs
+
+secrets:
+  artemisUser: artemis
+  artemisPassword: ""
+
+simulator:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/jakedgy/teamwork-cloud
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+cassandra:
+  replicaCount: 1
+  image:
+    repository: cassandra
+    tag: "4.1.4"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: "1"
+      memory: 2Gi
+    limits:
+      memory: 3Gi
+  persistence:
+    size: 8Gi
+
+zookeeper:
+  replicaCount: 1
+  image:
+    repository: zookeeper
+    tag: "3.9.2"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+  persistence:
+    size: 2Gi
+
+artemis:
+  replicaCount: 1
+  image:
+    repository: apache/activemq-artemis
+    tag: "2.32.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      memory: 2Gi
+  persistence:
+    size: 2Gi

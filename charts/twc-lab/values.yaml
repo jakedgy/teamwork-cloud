@@ -2,14 +2,17 @@ clusterName: twc-lab
 awsRegion: us-east-2
 
 storageClass:
+  # Set create=false to use a pre-existing StorageClass named below.
+  create: true
   name: auto-ebs
 
 secrets:
+  # Demo credentials are immutable after install; reinstall to change them.
   artemisUser: artemis
   artemisPassword: ""
 
+# Image digests are deliberately deferred until Task 9, after EKS validation.
 simulator:
-  replicaCount: 1
   image:
     repository: ghcr.io/jakedgy/teamwork-cloud
     tag: "0.1.0"
@@ -20,7 +23,6 @@ simulator:
       memory: 128Mi
 
 cassandra:
-  replicaCount: 1
   image:
     repository: cassandra
     tag: "4.1.4"
@@ -32,10 +34,10 @@ cassandra:
     limits:
       memory: 3Gi
   persistence:
+    # PVC sizes are install-time settings for this single-node prototype.
     size: 8Gi
 
 zookeeper:
-  replicaCount: 1
   image:
     repository: zookeeper
     tag: "3.9.2"
@@ -47,10 +49,10 @@ zookeeper:
     limits:
       memory: 1Gi
   persistence:
+    # PVC sizes are install-time settings for this single-node prototype.
     size: 2Gi
 
 artemis:
-  replicaCount: 1
   image:
     repository: apache/activemq-artemis
     tag: "2.32.0"
@@ -62,4 +64,5 @@ artemis:
     limits:
       memory: 2Gi
   persistence:
+    # PVC sizes are install-time settings for this single-node prototype.
     size: 2Gi

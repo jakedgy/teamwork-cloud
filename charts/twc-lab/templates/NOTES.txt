@@ -4,5 +4,13 @@ Wait for the nginx controller's external address, then open:
 
   http://<external-address>/webapp
 
-The Artemis password is intentionally required at install time. Keep it out of
-values files and supply it with a secret values source.
+The Artemis credentials are intentionally required and immutable at install
+time. Keep the password out of values files and supply it with a secret values
+source. To change credentials in this prototype, uninstall and reinstall it.
+
+PVC sizes are install-time settings. Set storageClass.create=false and provide
+storageClass.name to use an existing StorageClass instead of chart-managed
+auto-ebs. StatefulSet PVCs are deleted with their prototype workloads.
+
+Images use pinned version tags. Digest validation and pinning are deliberately
+deferred until Task 9, after validation on EKS.

@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "clusterName",
+    "awsRegion",
+    "storageClass",
+    "secrets",
+    "simulator",
+    "cassandra",
+    "zookeeper",
+    "artemis"
+  ],
+  "properties": {
+    "fullnameOverride": {
+      "$ref": "#/definitions/dnsLabel"
+    },
+    "clusterName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63
+    },
+    "awsRegion": {
+      "type": "string",
+      "pattern": "^[a-z]{2}(-[a-z]+)+-[0-9]+$"
+    },
+    "storageClass": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["create", "name"],
+      "properties": {
+        "create": {
+          "type": "boolean"
+        },
+        "name": {
+          "$ref": "#/definitions/dnsLabel"
+        }
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artemisUser", "artemisPassword"],
+      "properties": {
+        "artemisUser": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "artemisPassword": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      }
+    },
+    "simulator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image", "resources"],
+      "properties": {
+        "image": {
+          "$ref": "#/definitions/image"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        }
+      }
+    },
+    "cassandra": {
+      "$ref": "#/definitions/statefulWorkload"
+    },
+    "zookeeper": {
+      "$ref": "#/definitions/statefulWorkload"
+    },
+    "artemis": {
+      "$ref": "#/definitions/statefulWorkload"
+    }
+  },
+  "definitions": {
+    "dnsLabel": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63,
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "tag", "pullPolicy"],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^\\S+$"
+        },
+        "tag": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "not": {
+            "enum": ["latest"]
+          }
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"]
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requests": {
+          "$ref": "#/definitions/resourceList"
+        },
+        "limits": {
+          "$ref": "#/definitions/resourceList"
+        }
+      }
+    },
+    "resourceList": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cpu": {
+          "type": ["string", "number"]
+        },
+        "memory": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "statefulWorkload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image", "resources", "persistence"],
+      "properties": {
+        "image": {
+          "$ref": "#/definitions/image"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "persistence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["size"],
+          "properties": {
+            "size": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*(Mi|Gi|Ti)$"
+            }
+          }
+        }
+      }
+    }
+  }
+}

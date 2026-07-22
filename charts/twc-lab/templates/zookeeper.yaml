@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "twc-lab.fullname" . }}-zookeeper
+  name: {{ include "twc-lab.componentName" (dict "root" . "component" "zookeeper") }}
   labels:
     {{- include "twc-lab.labels" . | nindent 4 }}
     app.kubernetes.io/component: zookeeper
@@ -18,13 +18,16 @@ spec:
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: {{ include "twc-lab.fullname" . }}-zookeeper
+  name: {{ include "twc-lab.componentName" (dict "root" . "component" "zookeeper") }}
   labels:
     {{- include "twc-lab.labels" . | nindent 4 }}
     app.kubernetes.io/component: zookeeper
 spec:
-  serviceName: {{ include "twc-lab.fullname" . }}-zookeeper
-  replicas: {{ .Values.zookeeper.replicaCount }}
+  serviceName: {{ include "twc-lab.componentName" (dict "root" . "component" "zookeeper") }}
+  replicas: 1
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Delete
+    whenScaled: Delete
   selector:
     matchLabels:
       {{- include "twc-lab.componentSelectorLabels" (dict "root" . "component" "zookeeper") | nindent 6 }}
@@ -33,6 +36,10 @@ spec:
       labels:
         {{- include "twc-lab.componentSelectorLabels" (dict "root" . "component" "zookeeper") | nindent 8 }}
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: zookeeper
           image: "{{ .Values.zookeeper.image.repository }}:{{ .Values.zookeeper.image.tag }}"
@@ -42,20 +49,30 @@ spec:
               value: "1"
             - name: ZOO_STANDALONE_ENABLED
               value: "true"
+            - name: ZOO_DATA_LOG_DIR
+              value: /data/datalog
+            - name: ZOO_4LW_COMMANDS_WHITELIST
+              value: ruok
           ports:
             - name: client
               containerPort: 2181
               protocol: TCP
           readinessProbe:
-            tcpSocket:
-              port: client
+            exec:
+              command:
+                - /bin/bash
+                - -ec
+                - exec 3<>/dev/tcp/127.0.0.1/2181; printf ruok >&3; response=$(cat <&3); test "$response" = imok
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 6
           livenessProbe:
-            tcpSocket:
-              port: client
+            exec:
+              command:
+                - /bin/bash
+                - -ec
+                - exec 3<>/dev/tcp/127.0.0.1/2181; printf ruok >&3; response=$(cat <&3); test "$response" = imok
             initialDelaySeconds: 30
             periodSeconds: 20
             timeoutSeconds: 3

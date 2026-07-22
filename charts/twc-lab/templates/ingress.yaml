@@ -13,24 +13,38 @@ spec:
   rules:
     - http:
         paths:
+          - path: /
+            pathType: Exact
+            backend:
+              service:
+                name: {{ include "twc-lab.componentName" (dict "root" . "component" "simulator") }}
+                port:
+                  number: 8080
+          - path: /api/health
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "twc-lab.componentName" (dict "root" . "component" "simulator") }}
+                port:
+                  number: 8080
           - path: /webapp
             pathType: Prefix
             backend:
               service:
-                name: {{ include "twc-lab.fullname" . }}-simulator
+                name: {{ include "twc-lab.componentName" (dict "root" . "component" "simulator") }}
                 port:
                   number: 8080
           - path: /authentication
             pathType: Prefix
             backend:
               service:
-                name: {{ include "twc-lab.fullname" . }}-simulator
+                name: {{ include "twc-lab.componentName" (dict "root" . "component" "simulator") }}
                 port:
                   number: 8080
           - path: /admin
             pathType: Prefix
             backend:
               service:
-                name: {{ include "twc-lab.fullname" . }}-simulator
+                name: {{ include "twc-lab.componentName" (dict "root" . "component" "simulator") }}
                 port:
                   number: 8080

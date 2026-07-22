@@ -1,6 +1,7 @@
 controller:
   service:
     type: LoadBalancer
+    enableHttps: false
     loadBalancerClass: eks.amazonaws.com/nlb
     annotations:
       service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing

@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "twc-lab.fullname" . }}-artemis
+  name: {{ include "twc-lab.componentName" (dict "root" . "component" "artemis") }}
   labels:
     {{- include "twc-lab.labels" . | nindent 4 }}
     app.kubernetes.io/component: artemis
@@ -18,21 +18,30 @@ spec:
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: {{ include "twc-lab.fullname" . }}-artemis
+  name: {{ include "twc-lab.componentName" (dict "root" . "component" "artemis") }}
   labels:
     {{- include "twc-lab.labels" . | nindent 4 }}
     app.kubernetes.io/component: artemis
 spec:
-  serviceName: {{ include "twc-lab.fullname" . }}-artemis
-  replicas: {{ .Values.artemis.replicaCount }}
+  serviceName: {{ include "twc-lab.componentName" (dict "root" . "component" "artemis") }}
+  replicas: 1
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Delete
+    whenScaled: Delete
   selector:
     matchLabels:
       {{- include "twc-lab.componentSelectorLabels" (dict "root" . "component" "artemis") | nindent 6 }}
   template:
     metadata:
+      annotations:
+        checksum/artemis-secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
       labels:
         {{- include "twc-lab.componentSelectorLabels" (dict "root" . "component" "artemis") | nindent 8 }}
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: artemis
           image: "{{ .Values.artemis.image.repository }}:{{ .Values.artemis.image.tag }}"
@@ -41,12 +50,12 @@ spec:
             - name: ARTEMIS_USER
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "twc-lab.fullname" . }}-artemis
+                  name: {{ include "twc-lab.componentName" (dict "root" . "component" "artemis") }}
                   key: username
             - name: ARTEMIS_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "twc-lab.fullname" . }}-artemis
+                  name: {{ include "twc-lab.componentName" (dict "root" . "component" "artemis") }}
                   key: password
             - name: ANONYMOUS_LOGIN
               value: "false"
@@ -55,18 +64,24 @@ spec:
               containerPort: 61616
               protocol: TCP
           readinessProbe:
-            tcpSocket:
-              port: core
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - /var/lib/artemis-instance/bin/artemis check node --url tcp://127.0.0.1:61616 --user "$ARTEMIS_USER" --password "$ARTEMIS_PASSWORD" --timeout 5000
             initialDelaySeconds: 20
             periodSeconds: 10
-            timeoutSeconds: 3
+            timeoutSeconds: 10
             failureThreshold: 12
           livenessProbe:
-            tcpSocket:
-              port: core
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - /var/lib/artemis-instance/bin/artemis check node --url tcp://127.0.0.1:61616 --user "$ARTEMIS_USER" --password "$ARTEMIS_PASSWORD" --timeout 5000
             initialDelaySeconds: 60
-            periodSeconds: 20
-            timeoutSeconds: 3
+            periodSeconds: 30
+            timeoutSeconds: 10
             failureThreshold: 6
           resources:
             {{- toYaml .Values.artemis.resources | nindent 12 }}

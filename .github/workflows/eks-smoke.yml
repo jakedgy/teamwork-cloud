@@ -1,0 +1,145 @@
+name: EKS smoke test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: eks-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      CLUSTER_NAME: twc-lab-smoke-${{ github.run_id }}
+      NETWORK_MODE: managed
+      CONFIRM: '1'
+      KUBECONFIG: ${{ github.workspace }}/.twc-lab/kubeconfig
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Validate required repository variables
+        shell: bash
+        env:
+          AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+        run: |
+          if [[ -z "$AWS_ROLE_ARN" ]]; then
+            echo 'repository variable AWS_ROLE_ARN is required' >&2
+            exit 1
+          fi
+          if [[ -z "$AWS_REGION" ]]; then
+            echo 'repository variable AWS_REGION is required' >&2
+            exit 1
+          fi
+          if (( ${#CLUSTER_NAME} > 100 )) || [[ ! "$CLUSTER_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9-]*$ ]]; then
+            echo "generated cluster name '$CLUSTER_NAME' is not EKS-valid" >&2
+            exit 1
+          fi
+
+      - name: Configure AWS credentials through OIDC
+        uses: aws-actions/configure-aws-credentials@d979d5b3a71173a29b74b5b88418bfda9437d885 # v6.1.1
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: twc-lab-${{ github.run_id }}
+
+      - name: Set up Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        with:
+          version: v3.15.4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v5.1.0
+        with:
+          version: v1.34.1
+
+      - name: Install eksctl
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/eksctl_Linux_amd64.tar.gz"
+          bin_dir="$RUNNER_TEMP/eksctl-bin"
+          curl --fail --location --silent --show-error \
+            --output "$archive" \
+            https://github.com/eksctl-io/eksctl/releases/download/v0.229.0/eksctl_Linux_amd64.tar.gz
+          echo '4a104d3a2a001de219e227baea1f0513ce6e87e60fef7dfc219cb0694e378829  '"$archive" | sha256sum --check
+          mkdir -p "$bin_dir"
+          tar --extract --gzip --file "$archive" --directory "$bin_dir" eksctl
+          echo "$bin_dir" >> "$GITHUB_PATH"
+
+      - name: Preflight and deploy
+        run: |
+          make preflight
+          make deploy
+
+      - name: Check status and healthy public API
+        shell: bash
+        run: |
+          make status
+          hostname="$(kubectl --kubeconfig "$KUBECONFIG" -n ingress-nginx get service ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
+          if [[ -z "$hostname" ]]; then
+            echo 'ingress NLB hostname is empty' >&2
+            exit 1
+          fi
+          health_file="$RUNNER_TEMP/health.json"
+          for attempt in {1..30}; do
+            if curl --connect-timeout 5 --max-time 10 --fail --silent --show-error \
+              "http://${hostname}/api/health" > "$health_file"; then
+              if jq --exit-status '.services | length == 3 and all(.status == "ready")' "$health_file" >/dev/null; then
+                exit 0
+              fi
+            fi
+            sleep 10
+          done
+          echo 'public API did not report all three dependencies ready' >&2
+          jq . "$health_file" >&2 || true
+          exit 1
+
+      - name: Demonstrate Artemis failure and restore
+        shell: bash
+        run: |
+          hostname="$(kubectl --kubeconfig "$KUBECONFIG" -n ingress-nginx get service ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
+          health_file="$RUNNER_TEMP/failure-health.json"
+          make demo-failure SERVICE=artemis
+          sleep 20
+          make status
+          failed='false'
+          for attempt in {1..8}; do
+            if curl --connect-timeout 5 --max-time 10 --fail --silent --show-error \
+              "http://${hostname}/api/health" > "$health_file"; then
+              if jq --exit-status '.services | any(.name == "artemis" and .status == "unavailable")' "$health_file" >/dev/null; then
+                failed='true'
+                break
+              fi
+            fi
+            sleep 5
+          done
+          if [[ "$failed" != 'true' ]]; then
+            echo 'public API did not report the Artemis failure' >&2
+            jq . "$health_file" >&2 || true
+            exit 1
+          fi
+          make demo-restore
+          make status
+          for attempt in {1..24}; do
+            if curl --connect-timeout 5 --max-time 10 --fail --silent --show-error \
+              "http://${hostname}/api/health" > "$health_file"; then
+              if jq --exit-status '.services | length == 3 and all(.status == "ready")' "$health_file" >/dev/null; then
+                exit 0
+              fi
+            fi
+            sleep 5
+          done
+          echo 'public API did not return to all-ready after restore' >&2
+          jq . "$health_file" >&2 || true
+          exit 1
+
+      - name: Destroy smoke cluster
+        if: always()
+        run: CONFIRM=1 make destroy

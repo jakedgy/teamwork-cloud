@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 IFS=$'\n\t'
+# shellcheck source=scripts/lib.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 enable_diagnostics
 
@@ -63,7 +64,9 @@ fi
 if [[ $NETWORK_MODE == existing ]]; then
   vpcs=$(aws ec2 describe-vpcs --region "$AWS_REGION" --vpc-ids "$VPC_ID" --query 'Vpcs[].VpcId' --output text)
   read -r -a found_vpcs <<<"$vpcs"
-  (( ${#found_vpcs[@]} == 1 )) && [[ ${found_vpcs[0]} == "$VPC_ID" ]] || die "VPC_ID must resolve to exactly one VPC"
+  if (( ${#found_vpcs[@]} != 1 )) || [[ ${found_vpcs[0]} != "$VPC_ID" ]]; then
+    die "VPC_ID must resolve to exactly one VPC"
+  fi
 
   split_csv "$PUBLIC_SUBNET_IDS"
   rows=$(aws ec2 describe-subnets --region "$AWS_REGION" --subnet-ids "${CSV_VALUES[@]}" --filters "Name=vpc-id,Values=$VPC_ID" --query "Subnets[].join(\`\\t\`,[SubnetId,AvailabilityZone,to_string(AvailableIpAddressCount),to_string(MapPublicIpOnLaunch),not_null(Tags[?Key=='kubernetes.io/role/elb']|[0].Value, \`None\`)])" --output text)
@@ -86,7 +89,9 @@ if [[ $NETWORK_MODE == existing ]]; then
     done
     (( requested_subnet == 1 )) || die "AWS returned an unexpected subnet: $subnet"
     [[ $seen_csv != *",$subnet,"* ]] || die "AWS returned subnet $subnet more than once"
-    [[ $free_ips =~ ^[0-9]+$ ]] && (( free_ips >= 16 )) || die "Subnet $subnet has fewer than 16 available IP addresses"
+    if [[ ! $free_ips =~ ^[0-9]+$ ]] || (( free_ips < 16 )); then
+      die "Subnet $subnet has fewer than 16 available IP addresses"
+    fi
     case "$public_ip" in
       True|true) ;;
       *) die "Subnet $subnet does not map public IPs on launch" ;;

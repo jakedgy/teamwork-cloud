@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=scripts/lib.sh
 source "$SCRIPT_DIR/lib.sh"
 enable_diagnostics
 configure_timeouts
@@ -53,6 +54,7 @@ FAILED_SERVICE=${FAILED_SERVICE:-}
 NLB_HOSTNAME=${NLB_HOSTNAME:-}
 
 AWS_REGION="$AWS_REGION" CLUSTER_NAME="$CLUSTER_NAME" NETWORK_MODE="$NETWORK_MODE" VPC_ID="$VPC_ID" PUBLIC_SUBNET_IDS="$PUBLIC_SUBNET_IDS" "$SCRIPT_DIR/preflight.sh"
+# shellcheck disable=SC2034 # Persisted by write_state in the sourced lifecycle library.
 ACCOUNT_ID=$(current_account)
 
 if (( had_state == 0 )); then
@@ -120,7 +122,7 @@ elif [[ $cluster_status == *ResourceNotFoundException* ]]; then
   advance_phase CLUSTER_CREATING
   create_failed=0
   eksctl create cluster --config-file "$CLUSTER_CONFIG" || create_failed=1
-  if live_cluster=$(aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" --query 'cluster.arn' --output text 2>&1); then
+  if aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" --query 'cluster.arn' --output text >/dev/null 2>&1; then
     recover_cluster_identity
   elif (( create_failed == 1 )); then
     die "eksctl failed and no deployment-owned cluster could be recovered; state is preserved"

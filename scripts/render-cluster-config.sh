@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 IFS=$'\n\t'
+# shellcheck source=scripts/lib.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 enable_diagnostics
 
@@ -20,6 +21,7 @@ fi
 require_commands aws
 ensure_lab_dir
 split_csv "$PUBLIC_SUBNET_IDS"
+# shellcheck disable=SC2016 # AWS CLI JMESPath uses literal backticks.
 rows=$(aws ec2 describe-subnets --region "$AWS_REGION" --subnet-ids "${CSV_VALUES[@]}" --query 'Subnets[].join(`\t`,[AvailabilityZone,SubnetId])' --output text)
 (( $(printf '%s\n' "$rows" | sed '/^$/d' | wc -l | tr -d ' ') >= 2 )) || die "Could not discover at least two subnet availability zones"
 

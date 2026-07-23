@@ -538,6 +538,7 @@ assert_no_call "out-of-scope stack is never deleted" "aws cloudformation delete-
 
 new_case
 write_state managed
+# shellcheck disable=SC2016 # The literal command substitution tests that state is never evaluated.
 printf 'EVIL=$(touch %s)\n' "$CASE_DIR/executed" >>"$CASE_DIR/.twc-lab/state.env"
 expect_fail "state parser rejects unknown keys" run_script status.sh
 if [[ ! -e "$CASE_DIR/executed" ]]; then record "state parser never executes values" pass; else record "state parser never executes values" fail; fi

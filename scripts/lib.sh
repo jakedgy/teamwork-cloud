@@ -2,10 +2,14 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-readonly SCRIPT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+SCRIPT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck disable=SC2034 # Used by scripts that source this lifecycle library.
+readonly SCRIPT_ROOT
 readonly LAB_DIR="$PWD/.twc-lab"
 readonly STATE_FILE="$LAB_DIR/state.env"
+# shellcheck disable=SC2034 # Used by scripts that source this lifecycle library.
 readonly CLUSTER_CONFIG="$LAB_DIR/cluster.yaml"
+# shellcheck disable=SC2034 # Used by scripts that source this lifecycle library.
 readonly SECRETS_FILE="$LAB_DIR/secrets.yaml"
 readonly KUBECONFIG_FILE="$LAB_DIR/kubeconfig"
 
@@ -64,9 +68,9 @@ ensure_lab_dir() {
 load_state() {
   [[ -f $STATE_FILE ]] || die "State file not found: $STATE_FILE"
   local key value
-  ACCOUNT_ID= AWS_REGION= CLUSTER_NAME= NETWORK_MODE= PHASE= DEPLOYMENT_ID= CLUSTER_ARN=
-  VPC_ID= PUBLIC_SUBNET_IDS= SUBNET_IDS= STACK_NAME= VPC_STACK_ID= PENDING_VOLUME_IDS=
-  SIMULATOR_IMAGE_REPOSITORY= SIMULATOR_IMAGE_TAG= FAILED_SERVICE= NLB_HOSTNAME=
+  ACCOUNT_ID='' AWS_REGION='' CLUSTER_NAME='' NETWORK_MODE='' PHASE='' DEPLOYMENT_ID='' CLUSTER_ARN=''
+  VPC_ID='' PUBLIC_SUBNET_IDS='' SUBNET_IDS='' STACK_NAME='' VPC_STACK_ID='' PENDING_VOLUME_IDS=''
+  SIMULATOR_IMAGE_REPOSITORY='' SIMULATOR_IMAGE_TAG='' FAILED_SERVICE='' NLB_HOSTNAME=''
   while IFS='=' read -r key value || [[ -n ${key:-} ]]; do
     [[ -n ${key:-} ]] || continue
     case "$key" in
@@ -201,7 +205,9 @@ validate_simulator_image_override() {
   if [[ -z $repository && -z $tag ]]; then return 0; fi
   [[ -n $repository && -n $tag ]] || die "SIMULATOR_IMAGE_REPOSITORY and SIMULATOR_IMAGE_TAG must be set together"
   [[ $repository =~ ^ghcr\.io/[a-z0-9]+([._-][a-z0-9]+)*/[a-z0-9]+([._-][a-z0-9]+)*$ ]] || die "Invalid SIMULATOR_IMAGE_REPOSITORY"
-  (( ${#tag} <= 128 )) && [[ $tag =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]] || die "Invalid SIMULATOR_IMAGE_TAG"
+  if (( ${#tag} > 128 )) || [[ ! $tag =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]]; then
+    die "Invalid SIMULATOR_IMAGE_TAG"
+  fi
 }
 
 validate_cluster_arn() {
@@ -214,7 +220,9 @@ validate_stack_id() {
 
 validate_positive_bounded() {
   local label=$1 value=$2 maximum=$3
-  [[ $value =~ ^[0-9]+$ ]] && (( value > 0 && value <= maximum )) || die "$label must be an integer from 1 to $maximum"
+  if [[ ! $value =~ ^[0-9]+$ ]] || (( value <= 0 || value > maximum )); then
+    die "$label must be an integer from 1 to $maximum"
+  fi
 }
 
 configure_timeouts() {

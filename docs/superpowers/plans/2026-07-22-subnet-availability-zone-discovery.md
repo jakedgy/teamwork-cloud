@@ -23,7 +23,7 @@
 - Modify: `scripts/tests/operations_test.sh:53-62`
 - Test: `scripts/tests/operations_test.sh`
 
-- [ ] **Step 1: Make the fake AWS CLI distinguish scalar joins from multiselect lists**
+- [x] **Step 1: Make the fake AWS CLI distinguish scalar joins from multiselect lists**
 
 Update the `ec2 describe-subnets` fake so joined results reproduce AWS CLI's single-line text output when `FAKE_REAL_AWS_TEXT=1`, while multiselect-list queries retain one record per line:
 
@@ -52,7 +52,7 @@ Update the `ec2 describe-subnets` fake so joined results reproduce AWS CLI's sin
     ;;
 ```
 
-- [ ] **Step 2: Add regressions for managed and existing subnet discovery**
+- [x] **Step 2: Add regressions for managed and existing subnet discovery**
 
 After the existing managed deployment test, add:
 
@@ -84,7 +84,7 @@ else
 fi
 ```
 
-- [ ] **Step 3: Add renderer exact-membership regressions**
+- [x] **Step 3: Add renderer exact-membership regressions**
 
 Add managed deployment cases that require every requested subnet exactly once:
 
@@ -107,7 +107,7 @@ expect_fail "renderer rejects multiple subnets in one availability zone" run_scr
   $'FAKE_AZ_ROWS=us-east-2a\tsubnet-ma\nus-east-2a\tsubnet-mb' CONFIRM=1
 ```
 
-- [ ] **Step 4: Run the operational suite and verify RED**
+- [x] **Step 4: Run the operational suite and verify RED**
 
 Run:
 
@@ -117,7 +117,7 @@ bash scripts/tests/operations_test.sh
 
 Expected: the new real-AWS-text managed deployment, three-subnet existing deployment, exact omitted-subnet error assertion, duplicate-returned-subnet case, renderer duplicate-AZ case, and clear preflight duplicate-AZ assertion fail because production still uses scalar joins and lacks exact renderer validation.
 
-- [ ] **Step 5: Commit the failing regression tests**
+- [x] **Step 5: Commit the failing regression tests**
 
 ```bash
 git add scripts/tests/operations_test.sh
@@ -130,7 +130,7 @@ git commit -m "test: reproduce AWS subnet text output"
 - Modify: `scripts/preflight.sh:71-108`
 - Test: `scripts/tests/operations_test.sh`
 
-- [ ] **Step 1: Replace the joined scalar query with a multiselect-list query**
+- [x] **Step 1: Replace the joined scalar query with a multiselect-list query**
 
 Change the `describe-subnets` query to:
 
@@ -143,7 +143,7 @@ rows=$(aws ec2 describe-subnets \
   --output text)
 ```
 
-- [ ] **Step 2: Reject a repeated Availability Zone**
+- [x] **Step 2: Reject a repeated Availability Zone**
 
 Replace the unique-AZ counter branch inside the record loop with:
 
@@ -156,7 +156,7 @@ Replace the unique-AZ counter branch inside the record loop with:
 
 Keep the final `az_count >= 2` guard as defense in depth.
 
-- [ ] **Step 3: Run the existing-network regression cases**
+- [x] **Step 3: Run the existing-network regression cases**
 
 Run:
 
@@ -166,7 +166,7 @@ bash scripts/tests/operations_test.sh
 
 Expected: existing-network real-text and duplicate-AZ cases pass; managed renderer cases remain failing.
 
-- [ ] **Step 4: Commit the preflight fix**
+- [x] **Step 4: Commit the preflight fix**
 
 ```bash
 git add scripts/preflight.sh scripts/tests/operations_test.sh
@@ -179,7 +179,7 @@ git commit -m "fix: parse existing subnet records by row"
 - Modify: `scripts/render-cluster-config.sh:23-38`
 - Test: `scripts/tests/operations_test.sh`
 
-- [ ] **Step 1: Use row-oriented AWS CLI output**
+- [x] **Step 1: Use row-oriented AWS CLI output**
 
 Replace the renderer query with:
 
@@ -191,7 +191,7 @@ rows=$(aws ec2 describe-subnets \
   --output text)
 ```
 
-- [ ] **Step 2: Validate exact subnet membership and unique Availability Zones**
+- [x] **Step 2: Validate exact subnet membership and unique Availability Zones**
 
 Before creating the temporary YAML file, validate the records:
 
@@ -222,7 +222,7 @@ done <<<"$rows"
   die "Could not discover at least two subnet availability zones"
 ```
 
-- [ ] **Step 3: Run the operational suite and verify GREEN**
+- [x] **Step 3: Run the operational suite and verify GREEN**
 
 Run:
 
@@ -232,7 +232,7 @@ bash scripts/tests/operations_test.sh
 
 Expected: `192 passed, 0 failed` before the diagnostic regression is added.
 
-- [ ] **Step 4: Commit the renderer fix**
+- [x] **Step 4: Commit the renderer fix**
 
 ```bash
 git add scripts/render-cluster-config.sh
@@ -245,7 +245,7 @@ git commit -m "fix: validate rendered subnet availability zones"
 - Modify: `scripts/deploy.sh:67`
 - Test: `scripts/tests/operations_test.sh`
 
-- [ ] **Step 1: Add a diagnostic regression assertion**
+- [x] **Step 1: Add a diagnostic regression assertion**
 
 In the managed real-AWS-text deployment case, assert:
 
@@ -257,7 +257,7 @@ else
 fi
 ```
 
-- [ ] **Step 2: Run the operational suite and verify RED**
+- [x] **Step 2: Run the operational suite and verify RED**
 
 Run:
 
@@ -267,7 +267,7 @@ bash scripts/tests/operations_test.sh
 
 Expected: `expected deploy absence probes stay quiet` fails.
 
-- [ ] **Step 3: Disable the inherited ERR trap in both expected lookups**
+- [x] **Step 3: Disable the inherited ERR trap in both expected lookups**
 
 Change the stack command substitution at `scripts/deploy.sh:67` to:
 
@@ -285,7 +285,7 @@ if cluster_status=$(trap - ERR; aws eks describe-cluster \
   --query 'cluster.status' --output text 2>&1); then
 ```
 
-- [ ] **Step 4: Run the operational suite and verify GREEN**
+- [x] **Step 4: Run the operational suite and verify GREEN**
 
 Run:
 
@@ -295,7 +295,7 @@ bash scripts/tests/operations_test.sh
 
 Expected: `193 passed, 0 failed`, including `expected deploy absence probes stay quiet`.
 
-- [ ] **Step 5: Commit the diagnostic fix**
+- [x] **Step 5: Commit the diagnostic fix**
 
 ```bash
 git add scripts/deploy.sh scripts/tests/operations_test.sh
@@ -310,7 +310,7 @@ git commit -m "fix: silence expected deploy stack probe"
 - Verify: `scripts/render-cluster-config.sh`
 - Verify: `scripts/deploy.sh`
 
-- [ ] **Step 1: Check formatting and the complete diff**
+- [x] **Step 1: Check formatting and the complete diff**
 
 Run:
 
@@ -322,7 +322,7 @@ git status --short
 
 Expected: no whitespace errors and only the design, plan, tests, and three target scripts changed.
 
-- [ ] **Step 2: Run the complete verification suite**
+- [x] **Step 2: Run the complete verification suite**
 
 Run:
 
@@ -332,7 +332,7 @@ env GOCACHE=/tmp/twc-lab-debug-go-cache make verify
 
 Expected: exit 0, all Go tests and vet checks pass, Helm chart render contract passes, shell syntax passes, and all operational tests report zero failures.
 
-- [ ] **Step 3: Verify the corrected query against the live recorded subnets**
+- [x] **Step 3: Verify the corrected query against the live recorded subnets**
 
 Run:
 
@@ -346,7 +346,7 @@ aws ec2 describe-subnets \
 
 Expected: exactly two lines, one for `us-east-1a` and one for `us-east-1b`.
 
-- [ ] **Step 4: Commit any final plan tracking updates**
+- [x] **Step 4: Commit any final plan tracking updates**
 
 ```bash
 git add docs/superpowers/plans/2026-07-22-subnet-availability-zone-discovery.md

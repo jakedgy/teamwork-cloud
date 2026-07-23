@@ -25,7 +25,7 @@ simulator:
 cassandra:
   image:
     repository: cassandra
-    tag: "4.1.4"
+    tag: "4.1.11"
     pullPolicy: IfNotPresent
   resources:
     requests:
@@ -40,7 +40,7 @@ cassandra:
 zookeeper:
   image:
     repository: zookeeper
-    tag: "3.9.2"
+    tag: "3.9.5"
     pullPolicy: IfNotPresent
   resources:
     requests:
@@ -55,7 +55,7 @@ zookeeper:
 artemis:
   image:
     repository: apache/activemq-artemis
-    tag: "2.32.0"
+    tag: "2.44.0"
     pullPolicy: IfNotPresent
   resources:
     requests:

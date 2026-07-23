@@ -12,6 +12,8 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:f5b485ea962d9bd1186b2f6b3a061191539b905b82ec395de78cbfae51f20e35
 
 COPY --from=build /out/twc-lab /twc-lab
+COPY --from=build /src/LICENSE /src/THIRD_PARTY_NOTICES.md /licenses/
+COPY --from=build /src/LICENSES/ /licenses/third-party/
 USER 65532:65532
 EXPOSE 8080
 ENTRYPOINT ["/twc-lab"]

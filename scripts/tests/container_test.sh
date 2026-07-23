@@ -4,11 +4,13 @@ set -euo pipefail
 suffix="$$-${RANDOM}"
 image="twc-lab:test-${suffix}"
 container="twc-lab-container-test-${suffix}"
+license_dir=$(mktemp -d)
 curl_args=(--connect-timeout 2 --fail --silent --show-error)
 
 cleanup() {
   docker rm -f "$container" >/dev/null 2>&1 || true
   docker image rm -f "$image" >/dev/null 2>&1 || true
+  rm -rf "$license_dir"
 }
 trap cleanup EXIT
 
@@ -58,6 +60,31 @@ while true; do
   fi
   sleep 1
 done
+
+docker cp "${container}:/licenses/." "$license_dir"
+
+for notice in \
+  LICENSE \
+  THIRD_PARTY_NOTICES.md \
+  third-party/gocql-LICENSE.txt \
+  third-party/gocql-NOTICE.txt \
+  third-party/golang-snappy-LICENSE.txt \
+  third-party/go-hostpool-LICENSE.txt \
+  third-party/inf-LICENSE.txt; do
+  if [[ ! -s "$license_dir/$notice" ]]; then
+    echo "container license file '$notice' is missing or empty" >&2
+    exit 1
+  fi
+done
+
+if ! grep -Fq 'Zero-Clause BSD' "$license_dir/LICENSE"; then
+  echo 'container LICENSE is not the repository 0BSD license' >&2
+  exit 1
+fi
+if ! grep -Fq 'Apache Cassandra GoCQL Driver' "$license_dir/third-party/gocql-NOTICE.txt"; then
+  echo 'container does not carry the gocql NOTICE' >&2
+  exit 1
+fi
 
 webapp="$(curl "${curl_args[@]}" --max-time 3 "${base_url}/webapp")"
 if [[ "$webapp" != *"Simulated product layer"* ]]; then

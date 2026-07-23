@@ -8,6 +8,18 @@ This repository is a small, public EKS Auto Mode lab inspired by the topology of
 
 > **Cost and security warning:** Deploying creates billable AWS resources, including an EKS cluster, load balancer, compute, and EBS volumes. The lab uses public subnets and an HTTP-only public endpoint. Never enter sensitive data, credentials, license keys, or real project data. Run `make destroy` when finished and review its residual-resource report.
 
+## Projected cost
+
+For a continuously running lab in `us-east-1`, budget approximately:
+
+| Runtime | Estimated cost (USD) |
+| --- | ---: |
+| Hourly | **$0.40–$0.45** |
+| Daily (24 hours) | **$9.60–$10.80** |
+| Monthly (730 hours) | **$292–$329** |
+
+This July 2026 estimate assumes an EKS version in standard support, three On-Demand `c6a.large` EKS Auto Mode nodes, Auto Mode management fees, public IPv4 addresses, an internet-facing NLB with light traffic, and the lab's EBS volumes. Actual cost varies with Karpenter's selected nodes, traffic and NLCU usage, storage, data transfer, Region, purchase model, and Kubernetes support tier. Destroy the lab promptly when it is not in use. See AWS pricing for [EKS](https://aws.amazon.com/eks/pricing/), [EC2](https://aws.amazon.com/ec2/pricing/on-demand/), [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/), [VPC](https://aws.amazon.com/vpc/pricing/), and [EBS](https://aws.amazon.com/ebs/pricing/).
+
 Read the focused guides before presenting or operating the lab:
 
 - [Architecture and real/simulated boundaries](docs/architecture.md)

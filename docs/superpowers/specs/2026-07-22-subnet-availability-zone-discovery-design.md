@@ -40,10 +40,11 @@ unexpected CloudFormation outputs.
 
 ## Diagnostics
 
-The expected initial CloudFormation "stack does not exist" probe in deployment
-will disable the inherited `ERR` trap inside its command substitution, matching
-the existing preflight probes. This removes the misleading line-67 failure
-diagnostic without changing stack-creation behavior.
+The expected initial CloudFormation "stack does not exist" and EKS "cluster
+does not exist" probes in deployment will disable the inherited `ERR` trap
+inside their command substitutions, matching the existing preflight probes.
+This removes misleading command-failure diagnostics without changing resource
+creation behavior.
 
 ## Testing
 

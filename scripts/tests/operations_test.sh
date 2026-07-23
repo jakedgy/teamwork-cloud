@@ -55,21 +55,21 @@ case "${1:-} ${2:-}" in
     if [[ "$*" == *"Subnets[].[AvailabilityZone,SubnetId]"* ]]; then
       printf '%b\n' "${FAKE_AZ_ROWS:-us-east-2a\tsubnet-a\nus-east-2b\tsubnet-b}"
     elif [[ "$*" == *"AvailabilityZone,SubnetId"* ]]; then
-      rows=${FAKE_AZ_ROWS:-$'us-east-2a\tsubnet-a\nus-east-2b\tsubnet-b'}
       if [[ "${FAKE_REAL_AWS_TEXT:-0}" == 1 ]]; then
+        printf -v rows '%b' "${FAKE_AZ_ROWS:-us-east-2a\tsubnet-a\nus-east-2b\tsubnet-b}"
         printf '%s\n' "${rows//$'\n'/$'\t'}"
       else
-        printf '%s\n' "$rows"
+        printf '%b\n' "${FAKE_AZ_ROWS:-us-east-2a\tsubnet-a\nus-east-2b\tsubnet-b}"
       fi
     elif [[ "$*" == *"Subnets[].[SubnetId,AvailabilityZone"* ]]; then
       printf '%b\n' "${FAKE_SUBNET_ROWS:-subnet-a\tus-east-2a\t32\tTrue\t1\nsubnet-b\tus-east-2b\t32\tTrue\t1}"
     else
       [[ "$*" == *'join(`\t`'* ]] || exit 2
-      rows=${FAKE_SUBNET_ROWS:-$'subnet-a\tus-east-2a\t32\tTrue\t1\nsubnet-b\tus-east-2b\t32\tTrue\t1'}
       if [[ "${FAKE_REAL_AWS_TEXT:-0}" == 1 ]]; then
+        printf -v rows '%b' "${FAKE_SUBNET_ROWS:-subnet-a\tus-east-2a\t32\tTrue\t1\nsubnet-b\tus-east-2b\t32\tTrue\t1}"
         printf '%s\n' "${rows//$'\n'/$'\t'}"
       else
-        printf '%s\n' "$rows"
+        printf '%b\n' "${FAKE_SUBNET_ROWS:-subnet-a\tus-east-2a\t32\tTrue\t1\nsubnet-b\tus-east-2b\t32\tTrue\t1}"
       fi
     fi
     ;;
@@ -387,7 +387,7 @@ expect_fail "existing subnets cannot share an availability zone" run_script pref
   NETWORK_MODE=existing VPC_ID=vpc-123456 \
   PUBLIC_SUBNET_IDS=subnet-a,subnet-b,subnet-c \
   $'FAKE_SUBNET_ROWS=subnet-a\tus-east-2a\t32\tTrue\t1\nsubnet-b\tus-east-2a\t32\tTrue\t1\nsubnet-c\tus-east-2b\t32\tTrue\t1'
-if grep -Fq "Selected subnets must use distinct availability zones" "$TEST_ROOT/err"; then
+if grep -Fxq '[twc-lab] ERROR: Selected subnets must use distinct availability zones' "$TEST_ROOT/err"; then
   record "duplicate subnet availability zone has a clear error" pass
 else
   record "duplicate subnet availability zone has a clear error" fail
@@ -440,7 +440,7 @@ expect_ok "existing deploy accepts three distinct subnet availability zones" run
 new_case
 expect_fail "renderer rejects an omitted requested subnet" run_script deploy.sh \
   $'FAKE_AZ_ROWS=us-east-2a\tsubnet-ma' CONFIRM=1
-if grep -Fq "Could not discover every requested subnet availability zone" "$TEST_ROOT/err"; then
+if grep -Fxq '[twc-lab] ERROR: Could not discover every requested subnet availability zone' "$TEST_ROOT/err"; then
   record "omitted subnet has an exact renderer error" pass
 else
   record "omitted subnet has an exact renderer error" fail

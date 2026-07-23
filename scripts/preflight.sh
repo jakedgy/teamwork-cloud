@@ -41,7 +41,7 @@ if [[ -f $STATE_FILE ]]; then
   [[ $CLUSTER_NAME == "$requested_cluster" ]] || die "Existing state belongs to cluster $CLUSTER_NAME"
   [[ $NETWORK_MODE == "$requested_mode" ]] || die "Existing state uses network mode $NETWORK_MODE"
 else
-  if cluster_check=$(aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" --query 'cluster.status' --output text 2>&1); then
+  if cluster_check=$(trap - ERR; aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" --query 'cluster.status' --output text 2>&1); then
     die "Cluster $CLUSTER_NAME already exists but is not tracked by $STATE_FILE"
   elif [[ $cluster_check != *ResourceNotFoundException* ]]; then
     die "Unable to verify whether cluster $CLUSTER_NAME already exists"
@@ -50,7 +50,7 @@ fi
 
 if [[ $NETWORK_MODE == managed ]]; then
   intended_stack="${CLUSTER_NAME}-vpc"
-  if stack_check=$(aws cloudformation describe-stacks --stack-name "$intended_stack" --region "$AWS_REGION" --query 'Stacks[0].StackStatus' --output text 2>&1); then
+  if stack_check=$(trap - ERR; aws cloudformation describe-stacks --stack-name "$intended_stack" --region "$AWS_REGION" --query 'Stacks[0].StackStatus' --output text 2>&1); then
     (( state_present == 1 )) || die "Stack $intended_stack exists without tracked deployment state"
     if [[ -z $VPC_STACK_ID ]]; then recover_stack_identity; else verify_stack_identity; fi
   elif [[ $stack_check != *ValidationError* || $stack_check != *"does not exist"* ]]; then

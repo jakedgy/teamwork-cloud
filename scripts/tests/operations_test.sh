@@ -253,7 +253,12 @@ new_case() {
 run_script() {
   local script=$1
   shift
-  (cd "$CASE_DIR" && env "$@" "$ROOT/scripts/$script")
+  (cd "$CASE_DIR" && env \
+    -u AWS_DEFAULT_REGION -u AWS_PROFILE -u AWS_REGION \
+    -u CLUSTER_NAME -u CONFIRM -u JSON -u NETWORK_MODE \
+    -u PUBLIC_SUBNET_IDS -u SIMULATOR_IMAGE_REPOSITORY \
+    -u SIMULATOR_IMAGE_TAG -u SUBNET_IDS -u VPC_ID \
+    "$@" "$ROOT/scripts/$script")
 }
 
 record() {
@@ -345,6 +350,14 @@ expect_fail "preflight requires make" run_script preflight.sh PATH="$NO_MAKE_BIN
 
 new_case
 expect_fail "cluster lookup errors are not mistaken for absence" run_script preflight.sh FAKE_CLUSTER_ERROR=AccessDeniedException
+
+new_case
+expect_ok "managed preflight accepts absent cluster and stack" run_script preflight.sh
+if ! grep -Fq 'Command failed at line' "$TEST_ROOT/err"; then
+  record "expected absence probes do not emit failure diagnostics" pass
+else
+  record "expected absence probes do not emit failure diagnostics" fail
+fi
 
 new_case
 expect_fail "existing mode requires two public subnets" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a

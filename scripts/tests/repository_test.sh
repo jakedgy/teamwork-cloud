@@ -53,8 +53,7 @@ OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
 PERFORMANCE OF THIS SOFTWARE.
 LICENSE
 )
-actual_license=$(cat "$ROOT/LICENSE")
-[[ "$actual_license" == "$expected_license" ]] ||
+cmp -s "$ROOT/LICENSE" <(printf '%s\n' "$expected_license") ||
   fail "LICENSE does not match the approved Zero-Clause BSD text"
 
 replacements=$(cd "$ROOT" && go list -m \

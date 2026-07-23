@@ -130,4 +130,15 @@ for external_row in \
     fail "THIRD_PARTY_NOTICES.md is missing approved external component row: $external_row"
 done
 
+for required_file in CONTRIBUTING.md docs/repository-settings.md; do
+  [[ -s "$ROOT/$required_file" ]] || fail "$required_file is missing or empty"
+done
+for readme_link in CONTRIBUTING.md THIRD_PARTY_NOTICES.md docs/repository-settings.md; do
+  grep -Fq "($readme_link)" "$ROOT/README.md" || fail "README.md does not link to $readme_link"
+done
+grep -Fq 'make verify' "$ROOT/CONTRIBUTING.md" || fail "CONTRIBUTING.md omits make verify"
+grep -Fq 'make container-test' "$ROOT/CONTRIBUTING.md" || fail "CONTRIBUTING.md omits make container-test"
+grep -Fq 'Existing VPCs are externally owned' "$ROOT/CONTRIBUTING.md" || fail "CONTRIBUTING.md omits the existing-VPC boundary"
+grep -Fq 'No settings are changed by repository automation' "$ROOT/docs/repository-settings.md" || fail "repository settings guide does not state its non-mutating boundary"
+
 printf 'repository policy checks passed\n'

@@ -13,6 +13,9 @@ Read the focused guides before presenting or operating the lab:
 - [Architecture and real/simulated boundaries](docs/architecture.md)
 - [Short presentation script](docs/demo-script.md)
 - [Operations runbook](docs/runbook.md)
+- [Contribution guide and clean-room rules](CONTRIBUTING.md)
+- [Third-party licenses and notices](THIRD_PARTY_NOTICES.md)
+- [Repository settings review](docs/repository-settings.md)
 
 ## Prerequisites
 
@@ -142,3 +145,9 @@ The **EKS smoke test** workflow is manual because it creates paid resources. Con
 Create the repository before writing the role's OIDC trust policy, then obtain its actual owner and repository IDs. Repositories created after July 15, 2026 use an immutable environment subject shaped like `repo:jakedgy@OWNER_ID/teamwork-cloud@REPO_ID:environment:eks-smoke`; substitute the real numeric IDs and require that exact value in the AWS trust condition. Older repositories may use the legacy name-only subject. Confirm the format against GitHub's [OIDC subject reference](https://docs.github.com/en/actions/reference/security/oidc) rather than copying a placeholder into AWS.
 
 The workflow publishes the current commit as a unique `smoke-<run-id>-<short-sha>` image before deployment. The `ghcr.io/jakedgy/teamwork-cloud` package must be public so EKS can pull it anonymously; the chart intentionally configures no registry credential. Each run uses `twc-lab-smoke-${{ github.run_id }}` and refreshes its OIDC credentials immediately before the always-run `CONFIRM=1 make destroy` step.
+
+## License and contributions
+
+Original work in this repository is available under the [Zero-Clause BSD license](LICENSE). Third-party dependencies, images, charts, and tools remain under their own terms; see [third-party notices](THIRD_PARTY_NOTICES.md). Contributions are welcome under the focused [contribution guide](CONTRIBUTING.md).
+
+The current GitHub posture and owner-controlled hardening recommendations are recorded in [repository settings](docs/repository-settings.md). Repository automation does not silently change those settings.

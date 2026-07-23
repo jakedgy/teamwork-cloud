@@ -52,11 +52,25 @@ case "${1:-} ${2:-}" in
     ;;
   "ec2 describe-vpcs") printf '%s\n' "${FAKE_VPCS:-vpc-123456}" ;;
   "ec2 describe-subnets")
-    if [[ "$*" == *"AvailabilityZone,SubnetId"* ]]; then
+    if [[ "$*" == *"Subnets[].[AvailabilityZone,SubnetId]"* ]]; then
       printf '%b\n' "${FAKE_AZ_ROWS:-us-east-2a\tsubnet-a\nus-east-2b\tsubnet-b}"
+    elif [[ "$*" == *"AvailabilityZone,SubnetId"* ]]; then
+      rows=${FAKE_AZ_ROWS:-$'us-east-2a\tsubnet-a\nus-east-2b\tsubnet-b'}
+      if [[ "${FAKE_REAL_AWS_TEXT:-0}" == 1 ]]; then
+        printf '%s\n' "${rows//$'\n'/$'\t'}"
+      else
+        printf '%s\n' "$rows"
+      fi
+    elif [[ "$*" == *"Subnets[].[SubnetId,AvailabilityZone"* ]]; then
+      printf '%b\n' "${FAKE_SUBNET_ROWS:-subnet-a\tus-east-2a\t32\tTrue\t1\nsubnet-b\tus-east-2b\t32\tTrue\t1}"
     else
       [[ "$*" == *'join(`\t`'* ]] || exit 2
-      printf '%b\n' "${FAKE_SUBNET_ROWS:-subnet-a\tus-east-2a\t32\tTrue\t1\nsubnet-b\tus-east-2b\t32\tTrue\t1}"
+      rows=${FAKE_SUBNET_ROWS:-$'subnet-a\tus-east-2a\t32\tTrue\t1\nsubnet-b\tus-east-2b\t32\tTrue\t1'}
+      if [[ "${FAKE_REAL_AWS_TEXT:-0}" == 1 ]]; then
+        printf '%s\n' "${rows//$'\n'/$'\t'}"
+      else
+        printf '%s\n' "$rows"
+      fi
     fi
     ;;
   "ec2 describe-route-tables")
@@ -369,6 +383,17 @@ new_case
 expect_fail "existing subnets must span AZs" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b $'FAKE_SUBNET_ROWS=subnet-a\tus-east-2a\t32\tTrue\t1\nsubnet-b\tus-east-2a\t32\tTrue\t1'
 
 new_case
+expect_fail "existing subnets cannot share an availability zone" run_script preflight.sh \
+  NETWORK_MODE=existing VPC_ID=vpc-123456 \
+  PUBLIC_SUBNET_IDS=subnet-a,subnet-b,subnet-c \
+  $'FAKE_SUBNET_ROWS=subnet-a\tus-east-2a\t32\tTrue\t1\nsubnet-b\tus-east-2a\t32\tTrue\t1\nsubnet-c\tus-east-2b\t32\tTrue\t1'
+if grep -Fq "Selected subnets must use distinct availability zones" "$TEST_ROOT/err"; then
+  record "duplicate subnet availability zone has a clear error" pass
+else
+  record "duplicate subnet availability zone has a clear error" fail
+fi
+
+new_case
 expect_fail "existing subnets need sixteen free IPs" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b $'FAKE_SUBNET_ROWS=subnet-a\tus-east-2a\t15\tTrue\t1\nsubnet-b\tus-east-2b\t32\tTrue\t1'
 
 new_case
@@ -400,6 +425,34 @@ if grep -Fq 'nodePools:' "$CASE_DIR/.twc-lab/cluster.yaml" && grep -Fq 'general-
 if grep -Fq 'twc-lab:deployment-id: 0123456789abcdef0123456789abcdef' "$CASE_DIR/.twc-lab/cluster.yaml"; then record "renderer requests cluster ownership tag atomically" pass; else record "renderer requests cluster ownership tag atomically" fail; fi
 if grep -Fq 'http://lab.example.test/webapp' "$TEST_ROOT/out" && grep -Fq 'http://lab.example.test/admin' "$TEST_ROOT/out" && grep -Fq 'http://lab.example.test/admin/license' "$TEST_ROOT/out" && ! grep -Fq '/authentication' "$TEST_ROOT/out"; then record "deploy prints the required three URLs" pass; else record "deploy prints the required three URLs" fail; fi
 if ! grep -Fq 'simulator.image.repository' "$CALLS" && ! grep -Fq 'simulator.image.tag' "$CALLS"; then record "default deploy leaves simulator image values unchanged" pass; else record "default deploy leaves simulator image values unchanged" fail; fi
+
+new_case
+expect_ok "managed deploy parses real AWS text subnet rows" run_script deploy.sh FAKE_REAL_AWS_TEXT=1 CONFIRM=1
+
+new_case
+expect_ok "existing deploy accepts three distinct subnet availability zones" run_script deploy.sh \
+  NETWORK_MODE=existing VPC_ID=vpc-123456 \
+  PUBLIC_SUBNET_IDS=subnet-a,subnet-b,subnet-c \
+  $'FAKE_SUBNET_ROWS=subnet-a\tus-east-2a\t32\tTrue\t1\nsubnet-b\tus-east-2b\t32\tTrue\t1\nsubnet-c\tus-east-2c\t32\tTrue\t1' \
+  $'FAKE_AZ_ROWS=us-east-2a\tsubnet-a\nus-east-2b\tsubnet-b\nus-east-2c\tsubnet-c' \
+  FAKE_REAL_AWS_TEXT=1 CONFIRM=1
+
+new_case
+expect_fail "renderer rejects an omitted requested subnet" run_script deploy.sh \
+  $'FAKE_AZ_ROWS=us-east-2a\tsubnet-ma' CONFIRM=1
+if grep -Fq "Could not discover every requested subnet availability zone" "$TEST_ROOT/err"; then
+  record "omitted subnet has an exact renderer error" pass
+else
+  record "omitted subnet has an exact renderer error" fail
+fi
+
+new_case
+expect_fail "renderer rejects a duplicate returned subnet" run_script deploy.sh \
+  $'FAKE_AZ_ROWS=us-east-2a\tsubnet-ma\nus-east-2b\tsubnet-ma' CONFIRM=1
+
+new_case
+expect_fail "renderer rejects multiple subnets in one availability zone" run_script deploy.sh \
+  $'FAKE_AZ_ROWS=us-east-2a\tsubnet-ma\nus-east-2a\tsubnet-mb' CONFIRM=1
 
 new_case
 expect_fail "simulator image repository requires a tag" run_script deploy.sh SIMULATOR_IMAGE_REPOSITORY=ghcr.io/jakedgy/teamwork-cloud CONFIRM=1

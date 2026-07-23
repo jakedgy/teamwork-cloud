@@ -428,6 +428,11 @@ expect_fail "existing subnets carry public ELB role tags" run_script preflight.s
 
 new_case
 expect_ok "managed deploy succeeds with fake CLIs" run_script deploy.sh CONFIRM=1
+if ! grep -Fq 'Command failed at line' "$TEST_ROOT/err"; then
+  record "expected deploy absence probes stay quiet" pass
+else
+  record "expected deploy absence probes stay quiet" fail
+fi
 assert_order "managed stack precedes cluster creation" "aws cloudformation deploy" "eksctl create cluster"
 assert_order "cluster precedes ingress installation" "eksctl create cluster" "helm upgrade --install ingress-nginx"
 assert_order "ingress precedes app installation" "helm upgrade --install ingress-nginx" "helm upgrade --install twc-lab"

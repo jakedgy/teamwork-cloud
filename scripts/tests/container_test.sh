@@ -63,16 +63,21 @@ done
 
 docker cp "${container}:/licenses/." "$license_dir"
 
-for notice in \
-  LICENSE \
-  THIRD_PARTY_NOTICES.md \
-  third-party/gocql-LICENSE.txt \
-  third-party/gocql-NOTICE.txt \
-  third-party/golang-snappy-LICENSE.txt \
-  third-party/go-hostpool-LICENSE.txt \
-  third-party/inf-LICENSE.txt; do
-  if [[ ! -s "$license_dir/$notice" ]]; then
-    echo "container license file '$notice' is missing or empty" >&2
+for mapping in \
+  'LICENSE|LICENSE' \
+  'THIRD_PARTY_NOTICES.md|THIRD_PARTY_NOTICES.md' \
+  'third-party/gocql-LICENSE.txt|LICENSES/gocql-LICENSE.txt' \
+  'third-party/gocql-NOTICE.txt|LICENSES/gocql-NOTICE.txt' \
+  'third-party/golang-snappy-LICENSE.txt|LICENSES/golang-snappy-LICENSE.txt' \
+  'third-party/go-hostpool-LICENSE.txt|LICENSES/go-hostpool-LICENSE.txt' \
+  'third-party/inf-LICENSE.txt|LICENSES/inf-LICENSE.txt'; do
+  IFS='|' read -r image_path source_path <<< "$mapping"
+  if [[ ! -s "$license_dir/$image_path" ]]; then
+    echo "container license file '$image_path' is missing or empty" >&2
+    exit 1
+  fi
+  if ! cmp -s "$license_dir/$image_path" "$source_path"; then
+    echo "container license file '$image_path' differs from repository source '$source_path'" >&2
     exit 1
   fi
 done

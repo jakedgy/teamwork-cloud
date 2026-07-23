@@ -12,13 +12,13 @@ At the time of review, the repository has this posture:
 - GitHub Actions is enabled. Its default token is read-only and cannot approve pull request reviews.
 - Secret scanning and push protection are enabled.
 - No branch protection or repository ruleset protects `main`.
-- The `eks-smoke` environment has no protection rules.
+- The `eks-smoke` environment does not exist.
 - Dependabot security updates are disabled.
 
 ## Recommended owner-controlled hardening
 
 - Add a ruleset for `main` that blocks force pushes and deletion and requires the `Verify` status check before merging.
-- Protect the `eks-smoke` environment with required reviewers and restrict deployments to `main` before configuring its OIDC role.
+- Create the `eks-smoke` environment, configure required reviewers, and restrict deployments to `main` before configuring its OIDC role and variables.
 - Prefer squash merges and automatically delete branches after merging to keep history and branch state focused.
 - Retain the read-only Actions token, secret scanning, and push protection.
 

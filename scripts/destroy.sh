@@ -11,7 +11,7 @@ verify_current_account
 if [[ $NETWORK_MODE == managed ]]; then
   network_ownership='lab-managed'
 else
-  network_ownership='externally owned'
+  network_ownership='externally-owned'
 fi
 log "Destroy target:"
 log "  Account: $ACCOUNT_ID"

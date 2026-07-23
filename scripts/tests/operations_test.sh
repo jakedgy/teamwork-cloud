@@ -475,6 +475,11 @@ else
   record "managed destroy summarizes its exact target before confirmation" fail
 fi
 assert_no_call "unconfirmed managed destroy does not delete the cluster" "eksctl delete cluster"
+assert_no_call "unconfirmed managed destroy does not uninstall Helm releases" "helm uninstall"
+assert_no_call "unconfirmed managed destroy does not delete Kubernetes resources" "kubectl delete"
+assert_no_call "unconfirmed managed destroy does not scale Kubernetes resources" "kubectl scale"
+assert_no_call "unconfirmed managed destroy does not delete CloudFormation stacks" "aws cloudformation delete-stack"
+assert_no_call "unconfirmed managed destroy does not deploy CloudFormation stacks" "aws cloudformation deploy"
 
 new_case
 write_state existing
@@ -484,12 +489,17 @@ if grep -Fq 'Account: 111122223333' "$TEST_ROOT/err" &&
    grep -Fq 'Cluster: twc-lab' "$TEST_ROOT/err" &&
    grep -Fq 'Network mode: existing' "$TEST_ROOT/err" &&
    grep -Fq 'VPC: vpc-123456' "$TEST_ROOT/err" &&
-   grep -Fq 'Network ownership: externally owned' "$TEST_ROOT/err"; then
+   grep -Fq 'Network ownership: externally-owned' "$TEST_ROOT/err"; then
   record "existing-network destroy summarizes preserved ownership before confirmation" pass
 else
   record "existing-network destroy summarizes preserved ownership before confirmation" fail
 fi
 assert_no_call "unconfirmed existing-network destroy does not delete the cluster" "eksctl delete cluster"
+assert_no_call "unconfirmed existing-network destroy does not uninstall Helm releases" "helm uninstall"
+assert_no_call "unconfirmed existing-network destroy does not delete Kubernetes resources" "kubectl delete"
+assert_no_call "unconfirmed existing-network destroy does not scale Kubernetes resources" "kubectl scale"
+assert_no_call "unconfirmed existing-network destroy does not delete CloudFormation stacks" "aws cloudformation delete-stack"
+assert_no_call "unconfirmed existing-network destroy does not deploy CloudFormation stacks" "aws cloudformation deploy"
 
 new_case
 write_state managed

@@ -141,6 +141,8 @@ make destroy
 
 Before confirming, compare the displayed account, region, cluster, and network mode to your intended target. Teardown removes application and ingress releases, waits for the NLB to disappear, deletes the recorded cluster, checks tagged load balancer and EBS residuals, and finally deletes the VPC stack only in managed mode.
 
+GuardDuty Runtime Monitoring can briefly leave a managed data endpoint and security group in a lab VPC after EKS deletion. If those resources stall deletion of the exact recorded managed stack, teardown removes them in dependency order after a grace period. Automatic cleanup requires one unambiguous interface endpoint for the regional `guardduty-data` service with `GuardDutyManaged=true`, followed by one security group whose tag, name, description, and VPC all match GuardDuty's managed resource. It never changes GuardDuty configuration, directly deletes a default security group, or touches endpoints and groups in an existing network. Lookup failures, unexpected states, multiple matches, and non-matching resources fail closed and preserve local state.
+
 If teardown reports an incomplete phase, keep `.twc-lab/state.env`, resolve the exact reported blocker, and rerun `make destroy`. Do not delete the state file until the command confirms cleanup.
 
 For an additional read-only residual check, replace the placeholders with the exact cluster and region printed by status or teardown:

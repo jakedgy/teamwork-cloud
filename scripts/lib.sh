@@ -228,14 +228,159 @@ validate_positive_bounded() {
 configure_timeouts() {
   NLB_WAIT_SECONDS=${NLB_WAIT_SECONDS:-900}
   STORAGE_WAIT_SECONDS=${STORAGE_WAIT_SECONDS:-900}
+  STACK_WAIT_SECONDS=${STACK_WAIT_SECONDS:-3600}
+  STACK_DEPENDENCY_GRACE_SECONDS=${STACK_DEPENDENCY_GRACE_SECONDS:-60}
   POLL_SECONDS=${POLL_SECONDS:-10}
   validate_positive_bounded NLB_WAIT_SECONDS "$NLB_WAIT_SECONDS" 3600
   validate_positive_bounded STORAGE_WAIT_SECONDS "$STORAGE_WAIT_SECONDS" 3600
+  validate_positive_bounded STACK_WAIT_SECONDS "$STACK_WAIT_SECONDS" 3600
+  validate_positive_bounded STACK_DEPENDENCY_GRACE_SECONDS "$STACK_DEPENDENCY_GRACE_SECONDS" 900
   validate_positive_bounded POLL_SECONDS "$POLL_SECONDS" 60
+  (( STACK_DEPENDENCY_GRACE_SECONDS < STACK_WAIT_SECONDS )) ||
+    die "STACK_DEPENDENCY_GRACE_SECONDS must be less than STACK_WAIT_SECONDS"
 }
 
 lab_kubectl() { KUBECONFIG="$KUBECONFIG_FILE" kubectl "$@"; }
 lab_helm() { KUBECONFIG="$KUBECONFIG_FILE" helm "$@"; }
+
+remediate_guardduty_vpc_dependencies() {
+  local endpoint_json matching_endpoints endpoint_count endpoint_id endpoint_state failed_endpoint_ids
+  local security_group_json matching_groups group_count group_id delete_error
+  local service_name="com.amazonaws.${AWS_REGION}.guardduty-data"
+  local group_name="GuardDutyManagedSecurityGroup-${VPC_ID}"
+  local group_description="Associated with VPC-${VPC_ID} and tagged as GuardDutyManaged"
+
+  if ! endpoint_json=$(aws ec2 describe-vpc-endpoints \
+    --region "$AWS_REGION" \
+    --filters "Name=vpc-id,Values=$VPC_ID" \
+    --output json); then
+    log "Unable to inspect VPC endpoints while stack deletion is stalled"
+    return 1
+  fi
+  if ! matching_endpoints=$(printf '%s' "$endpoint_json" | jq -c \
+    --arg service "$service_name" \
+    '[.VpcEndpoints[]? | select(
+      .VpcEndpointType == "Interface" and
+      .ServiceName == $service and
+      .RequesterManaged == false and
+      any(.Tags[]?; .Key == "GuardDutyManaged" and .Value == "true")
+    )]'); then
+    log "Unable to parse VPC endpoint inventory while stack deletion is stalled"
+    return 1
+  fi
+  endpoint_count=$(printf '%s' "$matching_endpoints" | jq -r 'length')
+  if (( endpoint_count > 1 )); then
+    log "Refusing automatic cleanup: found $endpoint_count matching GuardDuty endpoints in VPC $VPC_ID"
+    return 1
+  fi
+  if (( endpoint_count == 1 )); then
+    endpoint_id=$(printf '%s' "$matching_endpoints" | jq -r '.[0].VpcEndpointId')
+    endpoint_state=$(printf '%s' "$matching_endpoints" | jq -r '.[0].State')
+    [[ $endpoint_id =~ ^vpce-[A-Za-z0-9]+$ ]] || {
+      log "Refusing automatic cleanup: GuardDuty endpoint returned an invalid ID"
+      return 1
+    }
+    if [[ $endpoint_state == deleting ]]; then
+      return 0
+    fi
+    [[ $endpoint_state == available ]] || {
+      log "Refusing automatic cleanup: GuardDuty endpoint $endpoint_id is in unexpected state $endpoint_state"
+      return 1
+    }
+    log "Deleting orphaned GuardDuty endpoint $endpoint_id from managed VPC $VPC_ID"
+    if ! failed_endpoint_ids=$(aws ec2 delete-vpc-endpoints \
+      --region "$AWS_REGION" \
+      --vpc-endpoint-ids "$endpoint_id" \
+      --query 'Unsuccessful[].VpcEndpointId' \
+      --output text); then
+      log "Unable to delete orphaned GuardDuty endpoint $endpoint_id"
+      return 1
+    fi
+    [[ -z $failed_endpoint_ids || $failed_endpoint_ids == None ]] || {
+      log "AWS refused to delete GuardDuty endpoint: $failed_endpoint_ids"
+      return 1
+    }
+    return 0
+  fi
+
+  if ! security_group_json=$(aws ec2 describe-security-groups \
+    --region "$AWS_REGION" \
+    --filters "Name=vpc-id,Values=$VPC_ID" \
+    --output json); then
+    log "Unable to inspect security groups while stack deletion is stalled"
+    return 1
+  fi
+  if ! matching_groups=$(printf '%s' "$security_group_json" | jq -c \
+    --arg name "$group_name" \
+    --arg description "$group_description" \
+    '[.SecurityGroups[]? | select(
+      .GroupName == $name and
+      .Description == $description and
+      any(.Tags[]?; .Key == "GuardDutyManaged" and .Value == "true")
+    )]'); then
+    log "Unable to parse security group inventory while stack deletion is stalled"
+    return 1
+  fi
+  group_count=$(printf '%s' "$matching_groups" | jq -r 'length')
+  if (( group_count > 1 )); then
+    log "Refusing automatic cleanup: found $group_count matching GuardDuty security groups in VPC $VPC_ID"
+    return 1
+  fi
+  (( group_count == 1 )) || return 0
+
+  group_id=$(printf '%s' "$matching_groups" | jq -r '.[0].GroupId')
+  [[ $group_id =~ ^sg-[A-Za-z0-9]+$ ]] || {
+    log "Refusing automatic cleanup: GuardDuty security group returned an invalid ID"
+    return 1
+  }
+  log "Deleting orphaned GuardDuty security group $group_id from managed VPC $VPC_ID"
+  if ! delete_error=$(aws ec2 delete-security-group \
+    --region "$AWS_REGION" \
+    --group-id "$group_id" 2>&1); then
+    if [[ $delete_error == *DependencyViolation* ]]; then
+      return 0
+    fi
+    log "Unable to delete orphaned GuardDuty security group $group_id: $delete_error"
+    return 1
+  fi
+}
+
+wait_for_managed_stack_deletion() {
+  local deadline=$((SECONDS + STACK_WAIT_SECONDS))
+  local dependency_check_at=$((SECONDS + STACK_DEPENDENCY_GRACE_SECONDS))
+  local stack_status
+
+  while :; do
+    if stack_status=$(aws cloudformation describe-stacks \
+      --stack-name "$VPC_STACK_ID" \
+      --region "$AWS_REGION" \
+      --query 'Stacks[0].StackStatus' \
+      --output text 2>&1); then
+      case "$stack_status" in
+        DELETE_COMPLETE) return 0 ;;
+        DELETE_IN_PROGRESS) ;;
+        *)
+          log "Managed stack entered unexpected status $stack_status during deletion"
+          return 1
+          ;;
+      esac
+    elif [[ $stack_status == *ValidationError* && $stack_status == *"does not exist"* ]]; then
+      return 0
+    else
+      log "Unable to inspect managed stack deletion: $stack_status"
+      return 1
+    fi
+
+    if (( SECONDS >= dependency_check_at )); then
+      remediate_guardduty_vpc_dependencies || return 1
+    fi
+    if (( SECONDS >= deadline )); then
+      log "Timed out deleting managed stack; inspect dependencies in VPC $VPC_ID"
+      return 1
+    fi
+    sleep "$POLL_SECONDS"
+  done
+}
 
 verify_cluster_identity() {
   [[ -n $CLUSTER_ARN ]] || die "State has no cluster ARN; refusing Kubernetes mutation"

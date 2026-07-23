@@ -51,6 +51,40 @@ case "${1:-} ${2:-}" in
     done
     ;;
   "ec2 describe-vpcs") printf '%s\n' "${FAKE_VPCS:-vpc-123456}" ;;
+  "ec2 describe-vpc-endpoints")
+    if [[ "${FAKE_ENDPOINT_LOOKUP_ERROR:-0}" == 1 ]]; then
+      printf 'AccessDeniedException\n' >&2
+      exit 254
+    fi
+    if [[ -n ${FAKE_ENDPOINT_JSON+x} ]]; then
+      printf '%s\n' "$FAKE_ENDPOINT_JSON"
+    elif [[ -f "${FAKE_GUARDDUTY_ENDPOINT_MARK:-/nonexistent}" ]]; then
+      printf '%s\n' '{"VpcEndpoints":[{"VpcEndpointId":"vpce-guardduty","VpcEndpointType":"Interface","ServiceName":"com.amazonaws.us-east-1.guardduty-data","State":"available","RequesterManaged":false,"Tags":[{"Key":"GuardDutyManaged","Value":"true"}]}]}'
+    else
+      printf '%s\n' '{"VpcEndpoints":[]}'
+    fi
+    ;;
+  "ec2 delete-vpc-endpoints")
+    rm -f "$FAKE_GUARDDUTY_ENDPOINT_MARK"
+    printf '%s\n' None
+    ;;
+  "ec2 describe-security-groups")
+    if [[ "${FAKE_SECURITY_GROUP_LOOKUP_ERROR:-0}" == 1 ]]; then
+      printf 'AccessDeniedException\n' >&2
+      exit 254
+    fi
+    if [[ -n ${FAKE_SECURITY_GROUP_JSON+x} ]]; then
+      printf '%s\n' "$FAKE_SECURITY_GROUP_JSON"
+    elif [[ -f "${FAKE_GUARDDUTY_SG_MARK:-/nonexistent}" ]]; then
+      printf '%s\n' '{"SecurityGroups":[{"GroupId":"sg-default","GroupName":"default","Description":"default VPC security group"},{"GroupId":"sg-guardduty","GroupName":"GuardDutyManagedSecurityGroup-vpc-123456","Description":"Associated with VPC-vpc-123456 and tagged as GuardDutyManaged","Tags":[{"Key":"GuardDutyManaged","Value":"true"}]}]}'
+    else
+      printf '%s\n' '{"SecurityGroups":[{"GroupId":"sg-default","GroupName":"default","Description":"default VPC security group"}]}'
+    fi
+    ;;
+  "ec2 delete-security-group")
+    rm -f "$FAKE_GUARDDUTY_SG_MARK"
+    printf '%s\n' '{"Return":true}'
+    ;;
   "ec2 describe-subnets")
     if [[ "$*" == *"Subnets[].[AvailabilityZone,SubnetId]"* ]]; then
       printf '%b\n' "${FAKE_AZ_ROWS:-us-east-1a\tsubnet-a\nus-east-1b\tsubnet-b}"
@@ -101,7 +135,19 @@ case "${1:-} ${2:-}" in
       *"StackId"*) printf '%s\n' "${FAKE_STACK_ID:-arn:aws:cloudformation:us-east-1:111122223333:stack/twc-lab-vpc/stack123}" ;;
       *"OutputKey=='VpcId'"*) printf '%s\n' "${FAKE_VPC_OUTPUT:-vpc-managed}" ;;
       *"OutputKey=='PublicSubnetIds'"*) printf '%s\n' "${FAKE_SUBNET_OUTPUT:-subnet-a,subnet-b}" ;;
-      *) printf '%s\n' "${FAKE_STACK_STATUS:-CREATE_COMPLETE}" ;;
+      *)
+        if [[ -f "${FAKE_STACK_DELETING_MARK:-/nonexistent}" ]]; then
+          if [[ -f "${FAKE_GUARDDUTY_ENDPOINT_MARK:-/nonexistent}" || -f "${FAKE_GUARDDUTY_SG_MARK:-/nonexistent}" ]]; then
+            printf '%s\n' DELETE_IN_PROGRESS
+          else
+            printf '%s\n' DELETE_COMPLETE
+          fi
+        elif [[ "$*" == *"--stack-name arn:"* && "${FAKE_STACK_STATUS:-}" == DELETE_IN_PROGRESS ]]; then
+          printf '%s\n' DELETE_COMPLETE
+        else
+          printf '%s\n' "${FAKE_STACK_STATUS:-CREATE_COMPLETE}"
+        fi
+        ;;
     esac
     ;;
   "cloudformation deploy")
@@ -111,7 +157,11 @@ case "${1:-} ${2:-}" in
     ;;
   "cloudformation delete-stack")
     [[ "${FAKE_DELETE_STACK_FAIL:-0}" != 1 ]] || exit 1
-    rm -f "$FAKE_STACK_MARK"
+    if [[ "${FAKE_STACK_DELETE_STALL:-0}" == 1 ]]; then
+      : >"$FAKE_STACK_DELETING_MARK"
+    else
+      rm -f "$FAKE_STACK_MARK"
+    fi
     ;;
   "cloudformation wait") [[ "${FAKE_STACK_DELETE_FAIL:-0}" != 1 ]] ;;
   "elbv2 describe-load-balancers")
@@ -241,6 +291,9 @@ export FAKE_STACK_MARK="$TEST_ROOT/stack-created"
 export FAKE_CLUSTER_MARK="$TEST_ROOT/cluster-created"
 export FAKE_PVC_DELETED_MARK="$TEST_ROOT/pvc-deleted"
 export FAKE_CLUSTER_TAG_MARK="$TEST_ROOT/cluster-deployment-tag"
+export FAKE_STACK_DELETING_MARK="$TEST_ROOT/stack-deleting"
+export FAKE_GUARDDUTY_ENDPOINT_MARK="$TEST_ROOT/guardduty-endpoint"
+export FAKE_GUARDDUTY_SG_MARK="$TEST_ROOT/guardduty-security-group"
 export PATH="$FAKE_BIN:/usr/bin:/bin"
 export KUBECONFIG="$TEST_ROOT/external-user-context"
 
@@ -262,6 +315,9 @@ new_case() {
   rm -f "$FAKE_CLUSTER_MARK"
   rm -f "$FAKE_PVC_DELETED_MARK"
   rm -f "$FAKE_CLUSTER_TAG_MARK"
+  rm -f "$FAKE_STACK_DELETING_MARK"
+  rm -f "$FAKE_GUARDDUTY_ENDPOINT_MARK"
+  rm -f "$FAKE_GUARDDUTY_SG_MARK"
 }
 
 run_script() {
@@ -823,6 +879,39 @@ write_state managed
 rm -f "$FAKE_CLUSTER_MARK"
 expect_ok "destroy resumes an in-progress stack deletion" run_script destroy.sh CONFIRM=1 FAKE_STACK_STATUS=DELETE_IN_PROGRESS FAKE_DELETE_STACK_FAIL=1
 assert_no_call "in-progress stack is not deleted twice" "aws cloudformation delete-stack"
+
+new_case
+write_state managed
+rm -f "$FAKE_CLUSTER_MARK"
+: >"$FAKE_GUARDDUTY_ENDPOINT_MARK"
+: >"$FAKE_GUARDDUTY_SG_MARK"
+expect_ok "destroy removes GuardDuty dependencies from a stalled managed VPC" run_script destroy.sh CONFIRM=1 FAKE_STACK_DELETE_STALL=1 STACK_DEPENDENCY_GRACE_SECONDS=1 STACK_WAIT_SECONDS=5 POLL_SECONDS=1
+assert_order "GuardDuty endpoint cleanup follows stack deletion" "aws cloudformation delete-stack" "aws ec2 delete-vpc-endpoints"
+assert_order "GuardDuty endpoint is removed before its security group" "aws ec2 delete-vpc-endpoints" "aws ec2 delete-security-group"
+assert_no_call "default VPC security group is never deleted directly" "aws ec2 delete-security-group --region us-east-1 --group-id sg-default"
+
+new_case
+write_state managed
+rm -f "$FAKE_CLUSTER_MARK"
+: >"$FAKE_GUARDDUTY_ENDPOINT_MARK"
+other_endpoint_json='{"VpcEndpoints":[{"VpcEndpointId":"vpce-other","VpcEndpointType":"Interface","ServiceName":"com.amazonaws.us-east-1.ssm","State":"available","RequesterManaged":false,"Tags":[]}]}'
+expect_fail "destroy preserves a non-GuardDuty endpoint" run_script destroy.sh CONFIRM=1 FAKE_STACK_DELETE_STALL=1 FAKE_ENDPOINT_JSON="$other_endpoint_json" STACK_DEPENDENCY_GRACE_SECONDS=1 STACK_WAIT_SECONDS=3 POLL_SECONDS=1
+assert_no_call "non-GuardDuty endpoint is never deleted" "aws ec2 delete-vpc-endpoints"
+
+new_case
+write_state managed
+rm -f "$FAKE_CLUSTER_MARK"
+: >"$FAKE_GUARDDUTY_ENDPOINT_MARK"
+ambiguous_endpoint_json='{"VpcEndpoints":[{"VpcEndpointId":"vpce-guardduty-a","VpcEndpointType":"Interface","ServiceName":"com.amazonaws.us-east-1.guardduty-data","State":"available","RequesterManaged":false,"Tags":[{"Key":"GuardDutyManaged","Value":"true"}]},{"VpcEndpointId":"vpce-guardduty-b","VpcEndpointType":"Interface","ServiceName":"com.amazonaws.us-east-1.guardduty-data","State":"available","RequesterManaged":false,"Tags":[{"Key":"GuardDutyManaged","Value":"true"}]}]}'
+expect_fail "destroy refuses ambiguous GuardDuty endpoints" run_script destroy.sh CONFIRM=1 FAKE_STACK_DELETE_STALL=1 FAKE_ENDPOINT_JSON="$ambiguous_endpoint_json" STACK_DEPENDENCY_GRACE_SECONDS=1 STACK_WAIT_SECONDS=3 POLL_SECONDS=1
+assert_no_call "ambiguous GuardDuty endpoints are never deleted" "aws ec2 delete-vpc-endpoints"
+
+new_case
+write_state managed
+rm -f "$FAKE_CLUSTER_MARK"
+: >"$FAKE_GUARDDUTY_ENDPOINT_MARK"
+expect_fail "destroy stops when GuardDuty endpoint lookup is unauthorized" run_script destroy.sh CONFIRM=1 FAKE_STACK_DELETE_STALL=1 FAKE_ENDPOINT_LOOKUP_ERROR=1 STACK_DEPENDENCY_GRACE_SECONDS=1 STACK_WAIT_SECONDS=3 POLL_SECONDS=1
+assert_no_call "unauthorized endpoint lookup never attempts deletion" "aws ec2 delete-vpc-endpoints"
 
 printf '%s passed, %s failed\n' "$pass" "$fail"
 (( fail == 0 ))

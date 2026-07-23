@@ -154,9 +154,9 @@ if (( failed == 0 )) && [[ $NETWORK_MODE == managed ]]; then
   if stack_status=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" --query 'Stacks[0].StackStatus' --output text 2>&1); then
     if [[ -z $VPC_STACK_ID ]]; then recover_stack_identity; else verify_stack_identity; fi
     if [[ $stack_status != DELETE_IN_PROGRESS ]]; then
-      aws cloudformation delete-stack --stack-name "$STACK_NAME" --region "$AWS_REGION"
+      aws cloudformation delete-stack --stack-name "$VPC_STACK_ID" --region "$AWS_REGION"
     fi
-    if ! aws cloudformation wait stack-delete-complete --stack-name "$STACK_NAME" --region "$AWS_REGION"; then failed=1; fi
+    wait_for_managed_stack_deletion || failed=1
   elif [[ $stack_status == *ValidationError* && $stack_status == *"does not exist"* ]]; then
     log "Managed stack is already absent"
   else

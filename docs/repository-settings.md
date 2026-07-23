@@ -4,7 +4,7 @@ No settings are changed by repository automation. The repository owner must revi
 
 ## Observed posture
 
-At the time of review, the repository has this posture:
+The repository posture below was observed on 2026-07-22 using GitHub's API:
 
 - The repository is public and uses `main` as its default branch.
 - Issues are enabled; the wiki and Discussions are disabled.
@@ -26,6 +26,6 @@ At the time of review, the repository has this posture:
 
 - Consider Dependabot security updates. They improve update visibility but also create maintenance traffic and still require review, notice updates, and verification.
 - Consider enforcing full commit SHA pinning for Actions. The workflows already pin actions by full SHA, so enforcement would make that convention an administrative guarantee.
-- Publish a security policy after the owner has a stable private reporting address.
+- Enable GitHub private vulnerability reporting, or publish a `SECURITY.md` after a monitored private reporting address exists.
 
 The `eks-smoke` workflow creates paid AWS resources. Do not configure or run it until the environment protection, OIDC trust, AWS account, and region have all been reviewed.

@@ -150,4 +150,4 @@ The workflow publishes the current commit as a unique `smoke-<run-id>-<short-sha
 
 Original work in this repository is available under the [Zero-Clause BSD license](LICENSE). Third-party dependencies, images, charts, and tools remain under their own terms; see [third-party notices](THIRD_PARTY_NOTICES.md). Contributions are welcome under the focused [contribution guide](CONTRIBUTING.md).
 
-The current GitHub posture and owner-controlled hardening recommendations are recorded in [repository settings](docs/repository-settings.md). Repository automation does not silently change those settings.
+The GitHub posture observed on 2026-07-22 and owner-controlled hardening recommendations are recorded in [repository settings](docs/repository-settings.md). Repository automation does not silently change those settings.

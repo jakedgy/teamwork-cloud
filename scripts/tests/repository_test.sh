@@ -133,12 +133,28 @@ done
 for required_file in CONTRIBUTING.md docs/repository-settings.md; do
   [[ -s "$ROOT/$required_file" ]] || fail "$required_file is missing or empty"
 done
-for readme_link in CONTRIBUTING.md THIRD_PARTY_NOTICES.md docs/repository-settings.md; do
-  grep -Fq "($readme_link)" "$ROOT/README.md" || fail "README.md does not link to $readme_link"
+for readme_guide in \
+  '- [Contribution guide and clean-room rules](CONTRIBUTING.md)' \
+  '- [Third-party licenses and notices](THIRD_PARTY_NOTICES.md)' \
+  '- [Repository settings review](docs/repository-settings.md)'; do
+  grep -Fqx -- "$readme_guide" "$ROOT/README.md" ||
+    fail "README.md is missing exact guide line: $readme_guide"
 done
-grep -Fq 'make verify' "$ROOT/CONTRIBUTING.md" || fail "CONTRIBUTING.md omits make verify"
-grep -Fq 'make container-test' "$ROOT/CONTRIBUTING.md" || fail "CONTRIBUTING.md omits make container-test"
-grep -Fq 'Existing VPCs are externally owned' "$ROOT/CONTRIBUTING.md" || fail "CONTRIBUTING.md omits the existing-VPC boundary"
-grep -Fq 'No settings are changed by repository automation' "$ROOT/docs/repository-settings.md" || fail "repository settings guide does not state its non-mutating boundary"
+for contribution_command in 'make verify' 'make container-test'; do
+  grep -Fqx "$contribution_command" "$ROOT/CONTRIBUTING.md" ||
+    fail "CONTRIBUTING.md omits exact command line: $contribution_command"
+done
+grep -Fqx -- '- Existing VPCs are externally owned. The supplied VPC, subnets, route tables, internet gateway, and tags are immutable external targets: workflows must not modify, retag, reroute, or delete them. EKS may create cluster-owned ENIs, security groups, and load balancers in the supplied network.' \
+  "$ROOT/CONTRIBUTING.md" || fail "CONTRIBUTING.md omits the exact existing-VPC boundary"
+grep -Fqx 'Private vulnerability reporting is not currently configured. Never post exploit details or credentials publicly. Open a public issue containing only a request for the maintainer to arrange a private channel, and share technical details only after that private channel exists.' \
+  "$ROOT/CONTRIBUTING.md" || fail "CONTRIBUTING.md omits the interim security-reporting process"
+grep -Fqx "No settings are changed by repository automation. The repository owner must review, approve, and apply every administrative change described here." \
+  "$ROOT/docs/repository-settings.md" || fail "repository settings guide does not state its exact non-mutating boundary"
+grep -Fqx "The repository posture below was observed on 2026-07-22 using GitHub's API:" \
+  "$ROOT/docs/repository-settings.md" || fail "repository settings guide omits the dated API observation"
+grep -Fqx -- '- Enable GitHub private vulnerability reporting, or publish a `SECURITY.md` after a monitored private reporting address exists.' \
+  "$ROOT/docs/repository-settings.md" || fail "repository settings guide omits the private-reporting recommendation"
+grep -Fqx 'The GitHub posture observed on 2026-07-22 and owner-controlled hardening recommendations are recorded in [repository settings](docs/repository-settings.md). Repository automation does not silently change those settings.' \
+  "$ROOT/README.md" || fail "README.md omits the dated repository-settings observation"
 
 printf 'repository policy checks passed\n'

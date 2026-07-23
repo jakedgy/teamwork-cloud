@@ -9,7 +9,7 @@ Contributions must use public information and original work. Do not submit propr
 ## Safety boundaries
 
 - Ordinary pull requests must not create paid AWS resources. Keep routine validation local and offline.
-- Existing VPCs are externally owned. Existing-network workflows may inspect them, but must not create, route, tag, modify, or delete VPC resources.
+- Existing VPCs are externally owned. The supplied VPC, subnets, route tables, internet gateway, and tags are immutable external targets: workflows must not modify, retag, reroute, or delete them. EKS may create cluster-owned ENIs, security groups, and load balancers in the supplied network.
 - Lifecycle changes must preserve recorded resource identity, explicit confirmation, bounded waits, and residual-resource checks.
 - Never commit credentials, `.twc-lab` state, vendor materials, or real customer or project data.
 
@@ -41,4 +41,4 @@ Unless explicitly stated otherwise, original contributions are provided under th
 
 ## Security reports
 
-Do not include exploit details or credentials in a public issue. Contact the repository owner privately through the contact options on their GitHub profile.
+Private vulnerability reporting is not currently configured. Never post exploit details or credentials publicly. Open a public issue containing only a request for the maintainer to arrange a private channel, and share technical details only after that private channel exists.

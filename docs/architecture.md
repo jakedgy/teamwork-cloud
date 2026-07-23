@@ -88,4 +88,4 @@ Cassandra requests 8 GiB; ZooKeeper and Artemis request 2 GiB each. The chart's 
 | Multiple replicas | One replica per workload | Lower cost, no high availability |
 | KEDA and optional product services | Omitted | Outside the lab's demonstration goal |
 
-See the [operations runbook](runbook.md) for diagnosis and the [presentation script](demo-script.md) for a concise walkthrough.
+See [how and why this lab differs from the product example](reference-comparison.md) for the operator-focused rationale, the [operations runbook](runbook.md) for diagnosis, and the [presentation script](demo-script.md) for a concise walkthrough.

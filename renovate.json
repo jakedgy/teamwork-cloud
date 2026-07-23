@@ -1,0 +1,76 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":disableDependencyDashboard"
+  ],
+  "timezone": "America/Chicago",
+  "schedule": [
+    "before 6am on monday"
+  ],
+  "prConcurrentLimit": 3,
+  "prHourlyLimit": 2,
+  "updateNotScheduled": false,
+  "automerge": false,
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^scripts\\/deploy\\.sh$/"
+      ],
+      "matchStrings": [
+        "--version (?<currentValue>\\S+) --namespace ingress-nginx"
+      ],
+      "depNameTemplate": "ingress-nginx",
+      "datasourceTemplate": "helm",
+      "registryUrlTemplate": "https://kubernetes.github.io/ingress-nginx"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Keep infrastructure updates reviewable as one non-major change",
+      "groupName": "infrastructure dependencies",
+      "matchManagers": [
+        "dockerfile",
+        "github-actions",
+        "helm-values",
+        "custom.regex"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "pin",
+        "digest"
+      ]
+    },
+    {
+      "description": "Tidy every Go update before compiled dependency and license review",
+      "matchManagers": [
+        "gomod"
+      ],
+      "postUpdateOptions": [
+        "gomodTidy"
+      ]
+    },
+    {
+      "description": "Keep non-major Go updates in one separate review",
+      "groupName": "Go dependencies",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "pin",
+        "digest"
+      ]
+    },
+    {
+      "description": "Do not update the simulator from its own published image",
+      "matchPackageNames": [
+        "ghcr.io/jakedgy/teamwork-cloud"
+      ],
+      "enabled": false
+    }
+  ]
+}

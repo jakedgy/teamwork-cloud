@@ -9,6 +9,41 @@ fail() {
   exit 1
 }
 
+[[ -s "$ROOT/renovate.json" ]] ||
+  fail "renovate.json is missing or empty"
+jq -e '
+  .extends == ["config:recommended", ":disableDependencyDashboard"] and
+  .timezone == "America/Chicago" and
+  .schedule == ["before 6am on monday"] and
+  .prConcurrentLimit == 3 and
+  .prHourlyLimit == 2 and
+  .updateNotScheduled == false and
+  .automerge == false and
+  any(
+    .packageRules[];
+    .groupName == "infrastructure dependencies" and
+    .matchManagers == ["dockerfile", "github-actions", "helm-values", "custom.regex"]
+  ) and
+  any(
+    .packageRules[];
+    .groupName == "Go dependencies" and
+    .matchManagers == ["gomod"]
+  ) and
+  any(
+    .packageRules[];
+    .matchManagers == ["gomod"] and
+    .postUpdateOptions == ["gomodTidy"] and
+    (has("groupName") | not) and
+    (has("matchUpdateTypes") | not)
+  ) and
+  any(
+    .packageRules[];
+    .matchPackageNames == ["ghcr.io/jakedgy/teamwork-cloud"] and
+    .enabled == false
+  )
+' "$ROOT/renovate.json" >/dev/null ||
+  fail "renovate.json does not preserve the approved low-noise policy"
+
 if matches=$(git -C "$ROOT" grep -n "$former_region" -- .); then
   printf '%s\n' "$matches" >&2
   fail "tracked files still reference the former default region"
@@ -132,7 +167,7 @@ for external_row in \
     fail "THIRD_PARTY_NOTICES.md is missing approved external component row: $external_row"
 done
 
-for required_file in CONTRIBUTING.md docs/repository-settings.md; do
+for required_file in CONTRIBUTING.md docs/reference-comparison.md docs/repository-settings.md; do
   [[ -s "$ROOT/$required_file" ]] || fail "$required_file is missing or empty"
 done
 
@@ -170,6 +205,7 @@ done
 
 for readme_guide in \
   '- [Contribution guide and clean-room rules](CONTRIBUTING.md)' \
+  '- [How and why this lab differs from the product example](docs/reference-comparison.md)' \
   '- [Third-party licenses and notices](THIRD_PARTY_NOTICES.md)' \
   '- [Repository settings review](docs/repository-settings.md)'; do
   grep -Fqx -- "$readme_guide" "$ROOT/README.md" ||

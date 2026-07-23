@@ -11,6 +11,7 @@ This repository is a small, public EKS Auto Mode lab inspired by the topology of
 Read the focused guides before presenting or operating the lab:
 
 - [Architecture and real/simulated boundaries](docs/architecture.md)
+- [How and why this lab differs from the product example](docs/reference-comparison.md)
 - [Short presentation script](docs/demo-script.md)
 - [Operations runbook](docs/runbook.md)
 - [Contribution guide and clean-room rules](CONTRIBUTING.md)
@@ -153,6 +154,8 @@ This is a clean-room educational reduction. It must not be used to infer Teamwor
 ## CI and image publication
 
 Pull requests and `main` run only free, local verification: Go tests and vet, Helm rendering, offline lifecycle tests, shell checks, a non-root container assertion, and Trivy. They receive no AWS credentials. Version tags and manually supplied versions publish `linux/amd64` and `linux/arm64` images to GHCR with a version tag and a `sha-<commit>` tag; the workflows never publish `latest` and refuse to overwrite an existing version tag.
+
+Dependency updates are configured in [`renovate.json`](renovate.json) for the hosted [Mend Renovate GitHub App](https://github.com/apps/renovate). Renovate runs in a weekly Monday window, groups non-major infrastructure updates, keeps Go changes separate for license review, limits open PRs, and never automerges. The checksum-coupled Helm and eksctl versions in `scripts/bootstrap-cloudshell.sh` remain manual so a version cannot change without its verified archive checksum.
 
 The **EKS smoke test** workflow is manual because it creates paid resources. Configure the `eks-smoke` GitHub environment with required reviewers and restrict its deployment branches to the repository default branch. Configure `AWS_ROLE_ARN` and `AWS_REGION` as environment or repository **variables** (neither value is a secret). The role must have the scoped permissions required by `make preflight`, `make deploy`, and `make destroy`. Do not configure long-lived AWS access-key secrets.
 

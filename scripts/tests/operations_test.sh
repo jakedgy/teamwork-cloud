@@ -100,7 +100,7 @@ case "${1:-} ${2:-}" in
       *"twc-lab:deployment-id"*) printf '%s\n' "${FAKE_STACK_DEPLOYMENT_ID:-0123456789abcdef0123456789abcdef}" ;;
       *"StackId"*) printf '%s\n' "${FAKE_STACK_ID:-arn:aws:cloudformation:us-east-2:111122223333:stack/twc-lab-vpc/stack123}" ;;
       *"OutputKey=='VpcId'"*) printf '%s\n' "${FAKE_VPC_OUTPUT:-vpc-managed}" ;;
-      *"OutputKey=='PublicSubnetIds'"*) printf '%s\n' "${FAKE_SUBNET_OUTPUT:-subnet-ma,subnet-mb}" ;;
+      *"OutputKey=='PublicSubnetIds'"*) printf '%s\n' "${FAKE_SUBNET_OUTPUT:-subnet-a,subnet-b}" ;;
       *) printf '%s\n' "${FAKE_STACK_STATUS:-CREATE_COMPLETE}" ;;
     esac
     ;;
@@ -439,7 +439,7 @@ expect_ok "existing deploy accepts three distinct subnet availability zones" run
 
 new_case
 expect_fail "renderer rejects an omitted requested subnet" run_script deploy.sh \
-  $'FAKE_AZ_ROWS=us-east-2a\tsubnet-ma' CONFIRM=1
+  $'FAKE_AZ_ROWS=us-east-2a\tsubnet-a' CONFIRM=1
 if grep -Fxq '[twc-lab] ERROR: Could not discover every requested subnet availability zone' "$TEST_ROOT/err"; then
   record "omitted subnet has an exact renderer error" pass
 else
@@ -448,11 +448,21 @@ fi
 
 new_case
 expect_fail "renderer rejects a duplicate returned subnet" run_script deploy.sh \
-  $'FAKE_AZ_ROWS=us-east-2a\tsubnet-ma\nus-east-2b\tsubnet-ma' CONFIRM=1
+  $'FAKE_AZ_ROWS=us-east-2a\tsubnet-a\nus-east-2b\tsubnet-a' CONFIRM=1
+if grep -Fxq '[twc-lab] ERROR: AWS returned subnet subnet-a more than once' "$TEST_ROOT/err"; then
+  record "duplicate returned subnet has an exact renderer error" pass
+else
+  record "duplicate returned subnet has an exact renderer error" fail
+fi
 
 new_case
 expect_fail "renderer rejects multiple subnets in one availability zone" run_script deploy.sh \
-  $'FAKE_AZ_ROWS=us-east-2a\tsubnet-ma\nus-east-2a\tsubnet-mb' CONFIRM=1
+  $'FAKE_AZ_ROWS=us-east-2a\tsubnet-a\nus-east-2a\tsubnet-b' CONFIRM=1
+if grep -Fxq '[twc-lab] ERROR: Selected subnets must use distinct availability zones' "$TEST_ROOT/err"; then
+  record "duplicate availability zone has an exact renderer error" pass
+else
+  record "duplicate availability zone has an exact renderer error" fail
+fi
 
 new_case
 expect_fail "simulator image repository requires a tag" run_script deploy.sh SIMULATOR_IMAGE_REPOSITORY=ghcr.io/jakedgy/teamwork-cloud CONFIRM=1

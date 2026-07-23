@@ -110,4 +110,5 @@ fi
 printf 'helm: %s\n' "$(helm version --short)"
 printf 'eksctl: %s\n' "$(eksctl version)"
 printf 'To use these tools in future shells, optionally run:\n'
+# shellcheck disable=SC2016 # Print a command for the user; expansion here would be incorrect.
 printf '%s\n' 'export PATH="$HOME/.local/bin:$PATH"'

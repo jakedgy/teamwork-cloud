@@ -380,6 +380,24 @@ new_case
 expect_fail "existing mode requires exactly one matching VPC" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b $'FAKE_VPCS=vpc-123456\tvpc-other'
 
 new_case
+expect_ok "existing preflight parses real AWS text subnet rows" run_script preflight.sh \
+  NETWORK_MODE=existing VPC_ID=vpc-123456 \
+  PUBLIC_SUBNET_IDS=subnet-a,subnet-b,subnet-c \
+  $'FAKE_SUBNET_ROWS=subnet-a\tus-east-2a\t32\tTrue\t1\nsubnet-b\tus-east-2b\t32\tTrue\t1\nsubnet-c\tus-east-2c\t32\tTrue\t1' \
+  FAKE_REAL_AWS_TEXT=1
+
+new_case
+expect_fail "existing preflight rejects a missing subnet availability zone" run_script preflight.sh \
+  NETWORK_MODE=existing VPC_ID=vpc-123456 \
+  PUBLIC_SUBNET_IDS=subnet-a,subnet-b \
+  $'FAKE_SUBNET_ROWS=subnet-a\tNone\t32\tTrue\t1\nsubnet-b\tus-east-2b\t32\tTrue\t1'
+if grep -Fxq '[twc-lab] ERROR: AWS returned subnet subnet-a without an availability zone' "$TEST_ROOT/err"; then
+  record "missing subnet availability zone has an exact error" pass
+else
+  record "missing subnet availability zone has an exact error" fail
+fi
+
+new_case
 expect_fail "existing subnets must span AZs" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b $'FAKE_SUBNET_ROWS=subnet-a\tus-east-2a\t32\tTrue\t1\nsubnet-b\tus-east-2a\t32\tTrue\t1'
 
 new_case

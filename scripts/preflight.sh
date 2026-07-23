@@ -89,7 +89,7 @@ if [[ $NETWORK_MODE == existing ]]; then
     done
     (( requested_subnet == 1 )) || die "AWS returned an unexpected subnet: $subnet"
     [[ $seen_csv != *",$subnet,"* ]] || die "AWS returned subnet $subnet more than once"
-    [[ -n ${az:-} ]] || die "Subnet $subnet has no availability zone"
+    [[ -n ${az:-} && $az != None ]] || die "AWS returned subnet $subnet without an availability zone"
     [[ $az_csv != *",$az,"* ]] || die "Selected subnets must use distinct availability zones"
     az_csv="${az_csv}${az},"
     az_count=$((az_count + 1))

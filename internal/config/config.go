@@ -56,7 +56,7 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 		ArtemisUser:     stringValue(lookup, artemisUserEnv, "artemis"),
 		ArtemisPassword: stringValue(lookup, artemisPasswordEnv, ""),
 		ClusterName:     stringValue(lookup, clusterNameEnv, "twc-lab"),
-		AWSRegion:       stringValue(lookup, awsRegionEnv, "us-east-2"),
+		AWSRegion:       stringValue(lookup, awsRegionEnv, "us-east-1"),
 	}, nil
 }
 

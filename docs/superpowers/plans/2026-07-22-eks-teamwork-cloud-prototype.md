@@ -79,7 +79,7 @@ Config{
     ZooKeeperHost: "twc-lab-zookeeper:2181",
     ArtemisHost: "twc-lab-artemis:61616",
     ArtemisUser: "artemis", ArtemisPassword: "",
-    ClusterName: "twc-lab", AWSRegion: "us-east-2",
+    ClusterName: "twc-lab", AWSRegion: "us-east-1",
 }
 ```
 
@@ -415,7 +415,7 @@ CloudFormation creates `10.42.0.0/16`, two `/20` public subnets in different AZs
 
 - [ ] **Step 4: Implement preflight and eksctl rendering**
 
-Default to `us-east-2`, `twc-lab`, and managed mode. Verify commands, caller, collision, and state identity. Existing mode verifies exact VPC membership, two AZs, 16 available IPs each, public-IP mapping, IGW default route, and role tag without modifying anything.
+Default to `us-east-1`, `twc-lab`, and managed mode. Verify commands, caller, collision, and state identity. Existing mode verifies exact VPC membership, two AZs, 16 available IPs each, public-IP mapping, IGW default route, and role tag without modifying anything.
 
 Render `.twc-lab/cluster.yaml` with explicit public subnets and:
 
@@ -471,7 +471,7 @@ make deploy
 make status
 ```
 
-Existing mode shows `NETWORK_MODE=existing VPC_ID=vpc-0123456789abcdef0 PUBLIC_SUBNET_IDS=subnet-0123456789abcdef0,subnet-0fedcba9876543210 AWS_REGION=us-east-2 make deploy` and explains the required subnet tag.
+Existing mode shows `NETWORK_MODE=existing VPC_ID=vpc-0123456789abcdef0 PUBLIC_SUBNET_IDS=subnet-0123456789abcdef0,subnet-0fedcba9876543210 AWS_REGION=us-east-1 make deploy` and explains the required subnet tag.
 
 - [ ] **Step 3: Write focused supporting guides**
 
@@ -521,7 +521,7 @@ Expected: PASS and clean status.
 
 - [ ] **Step 2: Run non-mutating AWS preflight**
 
-Run: `AWS_REGION=us-east-2 CLUSTER_NAME=twc-lab make preflight`
+Run: `AWS_REGION=us-east-1 CLUSTER_NAME=twc-lab make preflight`
 
 Expected: identity and intended managed network are printed; no resources are created.
 
@@ -532,7 +532,7 @@ Show the user the resolved account, region, and resources. Do not run deploy unt
 - [ ] **Step 4: Deploy and demonstrate health transitions**
 
 ```bash
-AWS_REGION=us-east-2 CLUSTER_NAME=twc-lab make deploy
+AWS_REGION=us-east-1 CLUSTER_NAME=twc-lab make deploy
 make status
 CONFIRM=1 make demo-failure SERVICE=artemis
 sleep 20

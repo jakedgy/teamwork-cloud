@@ -22,7 +22,7 @@ func TestFromLookupDefaults(t *testing.T) {
 		ArtemisUser:     "artemis",
 		ArtemisPassword: "",
 		ClusterName:     "twc-lab",
-		AWSRegion:       "us-east-2",
+		AWSRegion:       "us-east-1",
 	}
 	if got != want {
 		t.Errorf("FromLookup() = %#v, want %#v", got, want)

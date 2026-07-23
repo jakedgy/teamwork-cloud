@@ -21,7 +21,7 @@ func newTestHandler(t *testing.T, results []health.Result) http.Handler {
 	t.Helper()
 	handler, err := New(staticSnapshotter{results: results}, Metadata{
 		ClusterName: "demo-cluster",
-		AWSRegion:   "us-east-2",
+		AWSRegion:   "us-east-1",
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -128,7 +128,7 @@ func TestHealthAPIIncludesMetadataAndSortedSanitizedResults(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v; body=%s", err, recorder.Body.String())
 	}
-	if response.Cluster != "demo-cluster" || response.Region != "us-east-2" {
+	if response.Cluster != "demo-cluster" || response.Region != "us-east-1" {
 		t.Fatalf("metadata = %q, %q", response.Cluster, response.Region)
 	}
 	if !response.CheckedAt.Equal(newer) {

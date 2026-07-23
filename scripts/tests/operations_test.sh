@@ -24,7 +24,7 @@ case "${1:-} ${2:-}" in
       exit 254
     fi
     if [[ "$*" == *"cluster.arn"* ]]; then
-      printf '%s\n' "${FAKE_CLUSTER_ARN:-arn:aws:eks:us-east-2:111122223333:cluster/twc-lab}"
+      printf '%s\n' "${FAKE_CLUSTER_ARN:-arn:aws:eks:us-east-1:111122223333:cluster/twc-lab}"
     else
       printf '%s\n' ACTIVE
     fi
@@ -53,10 +53,10 @@ case "${1:-} ${2:-}" in
   "ec2 describe-vpcs") printf '%s\n' "${FAKE_VPCS:-vpc-123456}" ;;
   "ec2 describe-subnets")
     if [[ "$*" == *"AvailabilityZone,SubnetId"* ]]; then
-      printf '%b\n' "${FAKE_AZ_ROWS:-us-east-2a\tsubnet-a\nus-east-2b\tsubnet-b}"
+      printf '%b\n' "${FAKE_AZ_ROWS:-us-east-1a\tsubnet-a\nus-east-1b\tsubnet-b}"
     else
       [[ "$*" == *'join(`\t`'* ]] || exit 2
-      printf '%b\n' "${FAKE_SUBNET_ROWS:-subnet-a\tus-east-2a\t32\tTrue\t1\nsubnet-b\tus-east-2b\t32\tTrue\t1}"
+      printf '%b\n' "${FAKE_SUBNET_ROWS:-subnet-a\tus-east-1a\t32\tTrue\t1\nsubnet-b\tus-east-1b\t32\tTrue\t1}"
     fi
     ;;
   "ec2 describe-route-tables")
@@ -84,7 +84,7 @@ case "${1:-} ${2:-}" in
       *"ParameterKey=='ClusterName'"*) printf '%s\n' "${FAKE_STACK_CLUSTER:-twc-lab}" ;;
       *"ParameterKey=='DeploymentId'"*) printf '%s\n' "${FAKE_STACK_DEPLOYMENT_ID:-0123456789abcdef0123456789abcdef}" ;;
       *"twc-lab:deployment-id"*) printf '%s\n' "${FAKE_STACK_DEPLOYMENT_ID:-0123456789abcdef0123456789abcdef}" ;;
-      *"StackId"*) printf '%s\n' "${FAKE_STACK_ID:-arn:aws:cloudformation:us-east-2:111122223333:stack/twc-lab-vpc/stack123}" ;;
+      *"StackId"*) printf '%s\n' "${FAKE_STACK_ID:-arn:aws:cloudformation:us-east-1:111122223333:stack/twc-lab-vpc/stack123}" ;;
       *"OutputKey=='VpcId'"*) printf '%s\n' "${FAKE_VPC_OUTPUT:-vpc-managed}" ;;
       *"OutputKey=='PublicSubnetIds'"*) printf '%s\n' "${FAKE_SUBNET_OUTPUT:-subnet-ma,subnet-mb}" ;;
       *) printf '%s\n' "${FAKE_STACK_STATUS:-CREATE_COMPLETE}" ;;
@@ -314,16 +314,16 @@ write_state() {
   mkdir -p "$CASE_DIR/.twc-lab"
   cat >"$CASE_DIR/.twc-lab/state.env" <<EOF
 ACCOUNT_ID=111122223333
-AWS_REGION=us-east-2
+AWS_REGION=us-east-1
 CLUSTER_NAME=twc-lab
 NETWORK_MODE=$mode
 PHASE=DEPLOYED
 DEPLOYMENT_ID=0123456789abcdef0123456789abcdef
-CLUSTER_ARN=arn:aws:eks:us-east-2:111122223333:cluster/twc-lab
+CLUSTER_ARN=arn:aws:eks:us-east-1:111122223333:cluster/twc-lab
 VPC_ID=vpc-123456
 PUBLIC_SUBNET_IDS=subnet-a,subnet-b
 STACK_NAME=twc-lab-vpc
-VPC_STACK_ID=arn:aws:cloudformation:us-east-2:111122223333:stack/twc-lab-vpc/stack123
+VPC_STACK_ID=arn:aws:cloudformation:us-east-1:111122223333:stack/twc-lab-vpc/stack123
 PENDING_VOLUME_IDS=
 SIMULATOR_IMAGE_REPOSITORY=
 SIMULATOR_IMAGE_TAG=
@@ -366,13 +366,13 @@ new_case
 expect_fail "existing mode requires exactly one matching VPC" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b $'FAKE_VPCS=vpc-123456\tvpc-other'
 
 new_case
-expect_fail "existing subnets must span AZs" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b $'FAKE_SUBNET_ROWS=subnet-a\tus-east-2a\t32\tTrue\t1\nsubnet-b\tus-east-2a\t32\tTrue\t1'
+expect_fail "existing subnets must span AZs" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b $'FAKE_SUBNET_ROWS=subnet-a\tus-east-1a\t32\tTrue\t1\nsubnet-b\tus-east-1a\t32\tTrue\t1'
 
 new_case
-expect_fail "existing subnets need sixteen free IPs" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b $'FAKE_SUBNET_ROWS=subnet-a\tus-east-2a\t15\tTrue\t1\nsubnet-b\tus-east-2b\t32\tTrue\t1'
+expect_fail "existing subnets need sixteen free IPs" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b $'FAKE_SUBNET_ROWS=subnet-a\tus-east-1a\t15\tTrue\t1\nsubnet-b\tus-east-1b\t32\tTrue\t1'
 
 new_case
-expect_fail "existing subnets map public IPs" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b $'FAKE_SUBNET_ROWS=subnet-a\tus-east-2a\t32\tFalse\t1\nsubnet-b\tus-east-2b\t32\tTrue\t1'
+expect_fail "existing subnets map public IPs" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b $'FAKE_SUBNET_ROWS=subnet-a\tus-east-1a\t32\tFalse\t1\nsubnet-b\tus-east-1b\t32\tTrue\t1'
 
 new_case
 expect_fail "existing VPC has an IGW default route" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b FAKE_SELECTED_ROUTE=None
@@ -381,7 +381,7 @@ new_case
 expect_fail "selected subnet cannot borrow an unrelated IGW route" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b FAKE_EXPLICIT_ROUTE_TABLE_ID=rtb-selected FAKE_SELECTED_ROUTE=None FAKE_DEFAULT_ROUTES=igw-unrelated
 
 new_case
-expect_fail "existing subnets carry public ELB role tags" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b $'FAKE_SUBNET_ROWS=subnet-a\tus-east-2a\t32\tTrue\tNone\nsubnet-b\tus-east-2b\t32\tTrue\t1'
+expect_fail "existing subnets carry public ELB role tags" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b $'FAKE_SUBNET_ROWS=subnet-a\tus-east-1a\t32\tTrue\tNone\nsubnet-b\tus-east-1b\t32\tTrue\t1'
 
 new_case
 expect_ok "managed deploy succeeds with fake CLIs" run_script deploy.sh CONFIRM=1
@@ -478,7 +478,7 @@ new_case
 write_state managed
 expect_fail "managed destroy requires interactive confirmation" run_script destroy.sh
 if grep -Fq 'Account: 111122223333' "$TEST_ROOT/err" &&
-   grep -Fq 'Region: us-east-2' "$TEST_ROOT/err" &&
+   grep -Fq 'Region: us-east-1' "$TEST_ROOT/err" &&
    grep -Fq 'Cluster: twc-lab' "$TEST_ROOT/err" &&
    grep -Fq 'Network mode: managed' "$TEST_ROOT/err" &&
    grep -Fq 'VPC: vpc-123456' "$TEST_ROOT/err" &&
@@ -498,7 +498,7 @@ new_case
 write_state existing
 expect_fail "existing-network destroy requires interactive confirmation" run_script destroy.sh
 if grep -Fq 'Account: 111122223333' "$TEST_ROOT/err" &&
-   grep -Fq 'Region: us-east-2' "$TEST_ROOT/err" &&
+   grep -Fq 'Region: us-east-1' "$TEST_ROOT/err" &&
    grep -Fq 'Cluster: twc-lab' "$TEST_ROOT/err" &&
    grep -Fq 'Network mode: existing' "$TEST_ROOT/err" &&
    grep -Fq 'VPC: vpc-123456' "$TEST_ROOT/err" &&
@@ -585,7 +585,7 @@ new_case
 write_state managed
 expect_ok "destroy waits through bound PV and EBS cleanup" run_script destroy.sh CONFIRM=1 FAKE_PVC_PRESENT=1
 assert_order "PV lookup precedes cluster deletion" "kubectl get persistentvolume pv-lab123" "eksctl delete cluster"
-assert_order "EBS deletion check precedes cluster deletion" "aws ec2 describe-volumes --region us-east-2 --volume-ids vol-pvc123" "eksctl delete cluster"
+assert_order "EBS deletion check precedes cluster deletion" "aws ec2 describe-volumes --region us-east-1 --volume-ids vol-pvc123" "eksctl delete cluster"
 
 new_case
 write_state managed
@@ -596,7 +596,7 @@ assert_no_call "storage verification failure prevents cluster deletion" "eksctl 
 assert_no_call "storage verification failure preserves managed VPC" "aws cloudformation delete-stack"
 : >"$CALLS"
 expect_ok "storage cleanup retry consumes persisted pending volume" run_script destroy.sh CONFIRM=1
-assert_order "retry verifies pending volume before cluster deletion" "aws ec2 describe-volumes --region us-east-2 --volume-ids vol-pvc123" "eksctl delete cluster"
+assert_order "retry verifies pending volume before cluster deletion" "aws ec2 describe-volumes --region us-east-1 --volume-ids vol-pvc123" "eksctl delete cluster"
 
 new_case
 write_state managed
@@ -638,7 +638,7 @@ assert_no_call "cluster deletion retry bypasses completed Helm cleanup" "helm "
 
 new_case
 write_state managed
-expect_fail "Auto Mode ELB residual blocks cleanup" run_script destroy.sh CONFIRM=1 FAKE_ALL_ELB_ARNS=arn:aws:elasticloadbalancing:us-east-2:111122223333:loadbalancer/net/auto/123 FAKE_RESIDUAL_ELBS=arn:aws:elasticloadbalancing:us-east-2:111122223333:loadbalancer/net/auto/123
+expect_fail "Auto Mode ELB residual blocks cleanup" run_script destroy.sh CONFIRM=1 FAKE_ALL_ELB_ARNS=arn:aws:elasticloadbalancing:us-east-1:111122223333:loadbalancer/net/auto/123 FAKE_RESIDUAL_ELBS=arn:aws:elasticloadbalancing:us-east-1:111122223333:loadbalancer/net/auto/123
 if grep -Fq "eks:eks-cluster-name" "$CALLS" && [[ -f "$CASE_DIR/.twc-lab/state.env" ]]; then record "Auto Mode ELB ARN is detected and state preserved" pass; else record "Auto Mode ELB ARN is detected and state preserved" fail; fi
 assert_no_call "ELB residual preserves managed VPC stack" "aws cloudformation delete-stack"
 
@@ -695,13 +695,13 @@ assert_no_call "rollback stack prevents Helm mutation" "helm upgrade --install"
 new_case
 expect_ok "deploy prepares cluster identity" run_script deploy.sh CONFIRM=1
 : >"$CALLS"
-expect_fail "destroy rejects a same-name replacement cluster" run_script destroy.sh CONFIRM=1 FAKE_CLUSTER_ARN=arn:aws:eks:us-east-2:111122223333:cluster/replaced
+expect_fail "destroy rejects a same-name replacement cluster" run_script destroy.sh CONFIRM=1 FAKE_CLUSTER_ARN=arn:aws:eks:us-east-1:111122223333:cluster/replaced
 assert_no_call "replacement cluster is never mutated" "helm uninstall twc-lab"
 
 new_case
 expect_ok "deploy records stack identity" run_script deploy.sh CONFIRM=1
 : >"$CALLS"
-expect_fail "destroy rejects a replaced same-name stack" run_script destroy.sh CONFIRM=1 FAKE_STACK_ID=arn:aws:cloudformation:us-east-2:111122223333:stack/twc-lab-vpc/replaced
+expect_fail "destroy rejects a replaced same-name stack" run_script destroy.sh CONFIRM=1 FAKE_STACK_ID=arn:aws:cloudformation:us-east-1:111122223333:stack/twc-lab-vpc/replaced
 assert_no_call "replacement stack is never deleted" "aws cloudformation delete-stack"
 
 new_case

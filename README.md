@@ -27,7 +27,7 @@ You need an AWS account in which you may create EKS, IAM, EC2/VPC, Elastic Load 
 - GNU Make and Bash
 - Docker only for `make container-test` or a local image build
 
-The default region is `us-east-2`; set `AWS_REGION` to choose another. The default cluster name is `twc-lab`; set `CLUSTER_NAME` to override it. Preflight performs non-destructive checks and refuses account, region, cluster, or local-state mismatches.
+The default region is `us-east-1`; set `AWS_REGION` to choose another. The default cluster name is `twc-lab`; set `CLUSTER_NAME` to override it. Preflight performs non-destructive checks and refuses account, region, cluster, or local-state mismatches.
 
 ## Managed-VPC quick start
 
@@ -48,7 +48,7 @@ The managed VPC intentionally has no NAT gateway. Its subnets assign public IPv4
 Existing mode never creates, routes, tags, modifies, or deletes your VPC. Supply one VPC and at least two public subnets in different Availability Zones:
 
 ```bash
-NETWORK_MODE=existing VPC_ID=vpc-0123456789abcdef0 PUBLIC_SUBNET_IDS=subnet-0123456789abcdef0,subnet-0fedcba9876543210 AWS_REGION=us-east-2 make deploy
+NETWORK_MODE=existing VPC_ID=vpc-0123456789abcdef0 PUBLIC_SUBNET_IDS=subnet-0123456789abcdef0,subnet-0fedcba9876543210 AWS_REGION=us-east-1 make deploy
 ```
 
 Before cluster creation, the workflow verifies that every subnet belongs to the VPC, assigns public IPv4 addresses, has enough free addresses, routes through an internet gateway, spans at least two Availability Zones, and has the exact `kubernetes.io/role/elb=1` tag. Add or correct that tag yourself before retrying; the lab will not alter existing networking. See [the runbook](docs/runbook.md#existing-vpc-mode) for a separate preflight command and ownership details.

@@ -34,7 +34,7 @@ if [[ -f $STATE_FILE ]]; then
   [[ -z $requested_image_tag_set || $requested_image_tag == "$SIMULATOR_IMAGE_TAG" ]] || die "SIMULATOR_IMAGE_TAG conflicts with tracked state"
   [[ $PHASE != CLUSTER_DELETING ]] || die "Cluster deletion is in progress; run destroy to resume cleanup"
 fi
-AWS_REGION=${AWS_REGION:-us-east-2}
+AWS_REGION=${AWS_REGION:-us-east-1}
 CLUSTER_NAME=${CLUSTER_NAME:-twc-lab}
 NETWORK_MODE=${NETWORK_MODE:-managed}
 PHASE=${PHASE:-INITIALIZED}

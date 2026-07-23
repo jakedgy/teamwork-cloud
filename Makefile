@@ -39,6 +39,7 @@ verify:
 		exit 1; \
 	}
 	bash scripts/tests/operations_test.sh
+	bash scripts/tests/repository_test.sh
 
 container-test:
 	bash scripts/tests/container_test.sh

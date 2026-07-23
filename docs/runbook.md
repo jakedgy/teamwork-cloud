@@ -7,7 +7,7 @@ This runbook operates only the resources recorded for this lab. It never require
 For the default managed network:
 
 ```bash
-AWS_REGION=us-east-2 CLUSTER_NAME=twc-lab make preflight
+AWS_REGION=us-east-1 CLUSTER_NAME=twc-lab make preflight
 ```
 
 A successful preflight identifies the authenticated AWS account, selected region and cluster, required tools, and an available or matching managed VPC stack. It performs non-destructive AWS checks and does not create the cluster.
@@ -27,7 +27,7 @@ Typical actionable failures:
 Managed mode is the default. It creates a dedicated VPC with two public subnets and records ownership before creating the EKS Auto Mode cluster:
 
 ```bash
-AWS_REGION=us-east-2 CLUSTER_NAME=twc-lab make deploy
+AWS_REGION=us-east-1 CLUSTER_NAME=twc-lab make deploy
 make status
 ```
 
@@ -40,13 +40,13 @@ Choose at least two public subnets in different Availability Zones. Each must be
 Run preflight with the same values you will deploy:
 
 ```bash
-NETWORK_MODE=existing VPC_ID=vpc-0123456789abcdef0 PUBLIC_SUBNET_IDS=subnet-0123456789abcdef0,subnet-0fedcba9876543210 AWS_REGION=us-east-2 make preflight
+NETWORK_MODE=existing VPC_ID=vpc-0123456789abcdef0 PUBLIC_SUBNET_IDS=subnet-0123456789abcdef0,subnet-0fedcba9876543210 AWS_REGION=us-east-1 make preflight
 ```
 
 Then deploy:
 
 ```bash
-NETWORK_MODE=existing VPC_ID=vpc-0123456789abcdef0 PUBLIC_SUBNET_IDS=subnet-0123456789abcdef0,subnet-0fedcba9876543210 AWS_REGION=us-east-2 make deploy
+NETWORK_MODE=existing VPC_ID=vpc-0123456789abcdef0 PUBLIC_SUBNET_IDS=subnet-0123456789abcdef0,subnet-0fedcba9876543210 AWS_REGION=us-east-1 make deploy
 ```
 
 The deployment records the exact VPC and subnet IDs as externally owned. `make destroy` removes the lab but never deletes or modifies those VPC resources, routes, gateways, or tags.

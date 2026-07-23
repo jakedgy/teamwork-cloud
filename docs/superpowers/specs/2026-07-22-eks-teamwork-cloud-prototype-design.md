@@ -88,7 +88,7 @@ Generated files, credentials, local values, visual-companion artifacts, and down
 
 - Created by `eksctl`; Terraform and CDK are not part of version 1.
 - Default cluster name: `twc-lab`.
-- Default AWS region: `us-east-2`, overridable through `AWS_REGION`.
+- Default AWS region: `us-east-1`, overridable through `AWS_REGION`.
 - No self-managed node group is defined.
 - The configuration enables EKS Auto Mode compute and uses its general-purpose node pool.
 - The deploy workflow records the selected cluster name and region in a gitignored local state file so later commands target the same cluster.

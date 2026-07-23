@@ -44,6 +44,9 @@
 - Modify: `scripts/deploy.sh`
 - Modify: `charts/twc-lab/values.yaml`
 - Modify: `scripts/tests/operations_test.sh`
+- Modify: `internal/config/config.go`
+- Modify: `internal/config/config_test.go`
+- Modify: `internal/web/server_test.go`
 
 - [ ] **Step 1: Add a repository policy test that rejects the former Ohio-region identifier**
 
@@ -108,6 +111,9 @@ scripts/render-cluster-config.sh
 scripts/deploy.sh
 charts/twc-lab/values.yaml
 scripts/tests/operations_test.sh
+internal/config/config.go
+internal/config/config_test.go
+internal/web/server_test.go
 ```
 
 This is a literal token replacement only. It must update fake ARNs, fake stack IDs, `us-east-1a`/`us-east-1b` fixtures, expected diagnostic output, and AWS CLI assertions without changing lifecycle logic. Keep `${AWS_REGION:-us-east-1}` in all three scripts so explicit overrides continue to work.
@@ -119,9 +125,10 @@ Run:
 ```bash
 bash scripts/tests/repository_test.sh
 bash scripts/tests/operations_test.sh
+go test ./internal/config ./internal/web
 ```
 
-Expected: `repository policy checks passed` and the full lifecycle suite reports zero failures (currently 184 passing checks).
+Expected: `repository policy checks passed`, the full lifecycle suite reports zero failures (currently 184 passing checks), and the focused Go packages pass.
 
 - [ ] **Step 5: Commit the canonical-region change**
 
@@ -131,7 +138,9 @@ git add Makefile README.md docs/runbook.md \
   docs/superpowers/plans/2026-07-22-eks-teamwork-cloud-prototype.md \
   scripts/preflight.sh scripts/render-cluster-config.sh scripts/deploy.sh \
   scripts/tests/operations_test.sh scripts/tests/repository_test.sh \
-  charts/twc-lab/values.yaml
+  charts/twc-lab/values.yaml internal/config/config.go \
+  internal/config/config_test.go internal/web/server_test.go \
+  docs/superpowers/plans/2026-07-22-repository-readiness.md
 git commit -m "chore: standardize examples on us-east-1"
 ```
 

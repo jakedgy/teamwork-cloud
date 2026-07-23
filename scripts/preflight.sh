@@ -5,7 +5,7 @@ IFS=$'\n\t'
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 enable_diagnostics
 
-AWS_REGION=${AWS_REGION:-us-east-2}
+AWS_REGION=${AWS_REGION:-us-east-1}
 CLUSTER_NAME=${CLUSTER_NAME:-twc-lab}
 NETWORK_MODE=${NETWORK_MODE:-managed}
 VPC_ID=${VPC_ID:-}

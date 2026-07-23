@@ -1,5 +1,5 @@
 clusterName: twc-lab
-awsRegion: us-east-2
+awsRegion: us-east-1
 
 storageClass:
   # Set create=false to use a pre-existing StorageClass named below.

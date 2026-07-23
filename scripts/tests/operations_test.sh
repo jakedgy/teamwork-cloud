@@ -463,6 +463,36 @@ assert_no_call "invalid failure service does not touch Kubernetes" "kubectl "
 
 new_case
 write_state managed
+expect_fail "managed destroy requires interactive confirmation" run_script destroy.sh
+if grep -Fq 'Account: 111122223333' "$TEST_ROOT/err" &&
+   grep -Fq 'Region: us-east-2' "$TEST_ROOT/err" &&
+   grep -Fq 'Cluster: twc-lab' "$TEST_ROOT/err" &&
+   grep -Fq 'Network mode: managed' "$TEST_ROOT/err" &&
+   grep -Fq 'VPC: vpc-123456' "$TEST_ROOT/err" &&
+   grep -Fq 'Network ownership: lab-managed' "$TEST_ROOT/err"; then
+  record "managed destroy summarizes its exact target before confirmation" pass
+else
+  record "managed destroy summarizes its exact target before confirmation" fail
+fi
+assert_no_call "unconfirmed managed destroy does not delete the cluster" "eksctl delete cluster"
+
+new_case
+write_state existing
+expect_fail "existing-network destroy requires interactive confirmation" run_script destroy.sh
+if grep -Fq 'Account: 111122223333' "$TEST_ROOT/err" &&
+   grep -Fq 'Region: us-east-2' "$TEST_ROOT/err" &&
+   grep -Fq 'Cluster: twc-lab' "$TEST_ROOT/err" &&
+   grep -Fq 'Network mode: existing' "$TEST_ROOT/err" &&
+   grep -Fq 'VPC: vpc-123456' "$TEST_ROOT/err" &&
+   grep -Fq 'Network ownership: externally owned' "$TEST_ROOT/err"; then
+  record "existing-network destroy summarizes preserved ownership before confirmation" pass
+else
+  record "existing-network destroy summarizes preserved ownership before confirmation" fail
+fi
+assert_no_call "unconfirmed existing-network destroy does not delete the cluster" "eksctl delete cluster"
+
+new_case
+write_state managed
 expect_fail "destroy rejects an account mismatch" run_script destroy.sh CONFIRM=1 FAKE_ACCOUNT=999900001111
 assert_no_call "account mismatch prevents cluster deletion" "eksctl delete cluster"
 

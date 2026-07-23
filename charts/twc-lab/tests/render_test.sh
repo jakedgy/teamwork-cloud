@@ -223,7 +223,7 @@ for port in 9042 2181 61616 8080; do
   assert_contains "^      port: ${port}$|^        - containerPort: ${port}$" "expose port ${port}"
 done
 
-for path in /webapp /authentication /admin /api/health; do
+for path in /webapp /authentication /admin /api/health /static; do
   assert_ingress_route "$rendered" twc-lab "$path" Prefix
 done
 assert_ingress_route "$rendered" twc-lab / Exact

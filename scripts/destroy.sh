@@ -7,6 +7,19 @@ configure_timeouts
 require_commands aws eksctl helm jq kubectl
 load_state
 verify_current_account
+
+if [[ $NETWORK_MODE == managed ]]; then
+  network_ownership='lab-managed'
+else
+  network_ownership='externally owned'
+fi
+log "Destroy target:"
+log "  Account: $ACCOUNT_ID"
+log "  Region: $AWS_REGION"
+log "  Cluster: $CLUSTER_NAME"
+log "  Network mode: $NETWORK_MODE"
+log "  VPC: ${VPC_ID:-not created}"
+log "  Network ownership: $network_ownership"
 confirm_action "destroy cluster $CLUSTER_NAME" "$CLUSTER_NAME"
 
 failed=0

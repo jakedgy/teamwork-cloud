@@ -143,7 +143,7 @@ lab_helm repo update ingress-nginx
 verify_cluster_identity
 advance_phase HELM_STARTED
 lab_helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
-  --version 4.13.3 --namespace ingress-nginx --create-namespace \
+  --version 4.15.1 --namespace ingress-nginx --create-namespace \
   --values "$SCRIPT_ROOT/cluster/ingress-nginx-values.yaml" --atomic --timeout 15m
 
 verify_cluster_identity

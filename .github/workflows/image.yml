@@ -65,10 +65,22 @@ jobs:
           IMAGE: ${{ steps.tags.outputs.image }}
           VERSION: ${{ steps.tags.outputs.version }}
         run: |
-          if docker buildx imagetools inspect "${IMAGE}:${VERSION}" >/dev/null 2>&1; then
+          set +e
+          inspect_output="$(docker buildx imagetools inspect "${IMAGE}:${VERSION}" 2>&1)"
+          inspect_status=$?
+          set -e
+          if (( inspect_status == 0 )); then
             echo "version tag ${IMAGE}:${VERSION} already exists; refusing to overwrite it" >&2
             exit 1
           fi
+          inspect_output=${inspect_output,,}
+          case "$inspect_output" in
+            *"manifest unknown"*|*"not found"*) ;;
+            *)
+              echo "unable to prove that ${IMAGE}:${VERSION} is absent; refusing to publish" >&2
+              exit 1
+              ;;
+          esac
 
       - name: Build and publish multi-architecture image
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0

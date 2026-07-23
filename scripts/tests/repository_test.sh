@@ -138,6 +138,7 @@ done
 
 [[ -x "$ROOT/scripts/bootstrap-cloudshell.sh" ]] ||
   fail "scripts/bootstrap-cloudshell.sh is missing or not executable"
+# shellcheck disable=SC2016 # Match Make syntax literally; shell expansion would be incorrect.
 grep -Fqx 'export PATH := $(HOME)/.local/bin:$(PATH)' "$ROOT/Makefile" ||
   fail "Makefile does not prepend the CloudShell install directory to PATH"
 awk '
@@ -154,6 +155,7 @@ for bootstrap_constant in \
   grep -Fqx "$bootstrap_constant" "$ROOT/scripts/bootstrap-cloudshell.sh" ||
     fail "CloudShell bootstrap is missing exact constant: $bootstrap_constant"
 done
+# shellcheck disable=SC2016 # Match the bootstrap source line literally.
 grep -Fqx '  [[ $version != *-* ]] || return 1' "$ROOT/scripts/bootstrap-cloudshell.sh" ||
   fail "CloudShell bootstrap does not conservatively reject prerelease versions"
 for cloudshell_readme_line in \

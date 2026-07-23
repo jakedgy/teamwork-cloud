@@ -26,6 +26,6 @@ The repository posture below was observed on 2026-07-22 using GitHub's API:
 
 - Consider Dependabot security updates. They improve update visibility but also create maintenance traffic and still require review, notice updates, and verification.
 - Consider enforcing full commit SHA pinning for Actions. The workflows already pin actions by full SHA, so enforcement would make that convention an administrative guarantee.
-- Enable GitHub private vulnerability reporting, or publish a `SECURITY.md` after a monitored private reporting address exists.
+- Keep security reporting in GitHub Issues unless the repository owner deliberately changes that policy.
 
 The `eks-smoke` workflow creates paid AWS resources. Do not configure or run it until the environment protection, OIDC trust, AWS account, and region have all been reviewed.

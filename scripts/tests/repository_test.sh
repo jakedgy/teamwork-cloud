@@ -146,14 +146,20 @@ for contribution_command in 'make verify' 'make container-test'; do
 done
 grep -Fqx -- '- Existing VPCs are externally owned. The supplied VPC, subnets, route tables, internet gateway, and tags are immutable external targets: workflows must not modify, retag, reroute, or delete them. EKS may create cluster-owned ENIs, security groups, and load balancers in the supplied network.' \
   "$ROOT/CONTRIBUTING.md" || fail "CONTRIBUTING.md omits the exact existing-VPC boundary"
-grep -Fqx 'Private vulnerability reporting is not currently configured. Never post exploit details or credentials publicly. Open a public issue containing only a request for the maintainer to arrange a private channel, and share technical details only after that private channel exists.' \
-  "$ROOT/CONTRIBUTING.md" || fail "CONTRIBUTING.md omits the interim security-reporting process"
+grep -Fqx 'Open a GitHub Issue for security reports. Do not include credentials, secrets, personal data, or other sensitive material.' \
+  "$ROOT/CONTRIBUTING.md" || fail "CONTRIBUTING.md omits the exact security-reporting process"
 grep -Fqx "No settings are changed by repository automation. The repository owner must review, approve, and apply every administrative change described here." \
   "$ROOT/docs/repository-settings.md" || fail "repository settings guide does not state its exact non-mutating boundary"
 grep -Fqx "The repository posture below was observed on 2026-07-22 using GitHub's API:" \
   "$ROOT/docs/repository-settings.md" || fail "repository settings guide omits the dated API observation"
-grep -Fqx -- '- Enable GitHub private vulnerability reporting, or publish a `SECURITY.md` after a monitored private reporting address exists.' \
-  "$ROOT/docs/repository-settings.md" || fail "repository settings guide omits the private-reporting recommendation"
+grep -Fqx -- '- Keep security reporting in GitHub Issues unless the repository owner deliberately changes that policy.' \
+  "$ROOT/docs/repository-settings.md" || fail "repository settings guide omits the exact security-reporting policy"
+for stale_security_phrase in 'private channel' 'Private vulnerability reporting'; do
+  if grep -Fq "$stale_security_phrase" \
+    "$ROOT/CONTRIBUTING.md" "$ROOT/docs/repository-settings.md"; then
+    fail "repository guidance still contains stale security-reporting phrase: $stale_security_phrase"
+  fi
+done
 grep -Fqx 'The GitHub posture observed on 2026-07-22 and owner-controlled hardening recommendations are recorded in [repository settings](docs/repository-settings.md). Repository automation does not silently change those settings.' \
   "$ROOT/README.md" || fail "README.md omits the dated repository-settings observation"
 

@@ -41,4 +41,4 @@ Unless explicitly stated otherwise, original contributions are provided under th
 
 ## Security reports
 
-Private vulnerability reporting is not currently configured. Never post exploit details or credentials publicly. Open a public issue containing only a request for the maintainer to arrange a private channel, and share technical details only after that private channel exists.
+Open a GitHub Issue for security reports. Do not include credentials, secrets, personal data, or other sensitive material.

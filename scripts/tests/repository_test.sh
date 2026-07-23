@@ -110,6 +110,7 @@ grep -Fqx 'AWS CLI, eksctl, Kubernetes, Helm, Docker, Make, Bash, OpenSSL, jq, a
   "$ROOT/THIRD_PARTY_NOTICES.md" ||
   fail "THIRD_PARTY_NOTICES.md does not contain the approved separately acquired tools notice"
 
+# shellcheck disable=SC2016 # Markdown code spans require literal backticks.
 for compiled_row in \
   '| `github.com/gocql/gocql v1.7.0` | Apache-2.0 ([LICENSE](LICENSES/gocql-LICENSE.txt), [NOTICE](LICENSES/gocql-NOTICE.txt)) |' \
   '| `github.com/golang/snappy v0.0.3` | BSD-3-Clause ([LICENSE](LICENSES/golang-snappy-LICENSE.txt)) |' \
@@ -119,6 +120,7 @@ for compiled_row in \
     fail "THIRD_PARTY_NOTICES.md is missing approved compiled component row: $compiled_row"
 done
 
+# shellcheck disable=SC2016 # Markdown code spans require literal backticks.
 for external_row in \
   '| `cassandra:4.1.4` | [Apache Cassandra](https://github.com/apache/cassandra) | Apache-2.0 plus image notices |' \
   '| `zookeeper:3.9.2` | [Apache ZooKeeper](https://github.com/apache/zookeeper) | Apache-2.0 plus image notices |' \

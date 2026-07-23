@@ -230,7 +230,7 @@ Run:
 bash scripts/tests/operations_test.sh
 ```
 
-Expected: `192 passed, 0 failed` before the diagnostic regression is added.
+Expected: `197 passed, 0 failed` before the diagnostic regression is added.
 
 - [x] **Step 4: Commit the renderer fix**
 
@@ -293,7 +293,7 @@ Run:
 bash scripts/tests/operations_test.sh
 ```
 
-Expected: `193 passed, 0 failed`, including `expected deploy absence probes stay quiet`.
+Expected: `200 passed, 0 failed`, including `expected deploy absence probes stay quiet`.
 
 - [x] **Step 5: Commit the diagnostic fix**
 

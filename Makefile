@@ -1,7 +1,11 @@
 SHELL := /bin/bash
+export PATH := $(HOME)/.local/bin:$(PATH)
 export SERVICE
 
-.PHONY: preflight deploy status demo-failure demo-restore verify container-test destroy
+.PHONY: bootstrap-cloudshell preflight deploy status demo-failure demo-restore verify container-test destroy
+
+bootstrap-cloudshell:
+	bash scripts/bootstrap-cloudshell.sh
 
 preflight:
 	bash scripts/preflight.sh

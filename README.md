@@ -17,6 +17,20 @@ Read the focused guides before presenting or operating the lab:
 - [Third-party licenses and notices](THIRD_PARTY_NOTICES.md)
 - [Repository settings review](docs/repository-settings.md)
 
+## AWS CloudShell quick start
+
+Open the public AWS CloudShell in `us-east-1` (N. Virginia), then run:
+
+```bash
+git clone https://github.com/jakedgy/teamwork-cloud.git
+cd teamwork-cloud
+make bootstrap-cloudshell
+make preflight
+make deploy
+```
+
+The bootstrap reuses compatible tools or installs checksum-pinned Helm and eksctl binaries under `$HOME/.local/bin`. It does not use `sudo`, edit your shell profile, call AWS APIs, or create resources. Public CloudShell `$HOME` storage persists separately in each region; VPC CloudShell storage does not persist. `make preflight` still checks prerequisites and AWS identity before `make deploy` creates billable resources.
+
 ## Prerequisites
 
 You need an AWS account in which you may create EKS, IAM, EC2/VPC, Elastic Load Balancing, CloudFormation, and EBS resources, plus working local authentication (`aws sts get-caller-identity`). Install:

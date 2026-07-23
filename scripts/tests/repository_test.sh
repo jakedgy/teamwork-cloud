@@ -135,6 +135,31 @@ done
 for required_file in CONTRIBUTING.md docs/repository-settings.md; do
   [[ -s "$ROOT/$required_file" ]] || fail "$required_file is missing or empty"
 done
+
+[[ -x "$ROOT/scripts/bootstrap-cloudshell.sh" ]] ||
+  fail "scripts/bootstrap-cloudshell.sh is missing or not executable"
+grep -Eq '^bootstrap-cloudshell:[[:space:]]*$' "$ROOT/Makefile" ||
+  fail "Makefile is missing the bootstrap-cloudshell target"
+grep -Eq '^[[:space:]]*bash scripts/bootstrap-cloudshell\.sh[[:space:]]*$' "$ROOT/Makefile" ||
+  fail "bootstrap-cloudshell target does not run the expected script"
+for bootstrap_constant in \
+  'HELM_INSTALL_VERSION=v3.15.4' \
+  'HELM_ARCHIVE_SHA256=11400fecfc07fd6f034863e4e0c4c4445594673fd2a129e701fe41f31170cfa9' \
+  'EKSCTL_INSTALL_VERSION=v0.229.0' \
+  'EKSCTL_ARCHIVE_SHA256=4a104d3a2a001de219e227baea1f0513ce6e87e60fef7dfc219cb0694e378829'; do
+  grep -Fqx "$bootstrap_constant" "$ROOT/scripts/bootstrap-cloudshell.sh" ||
+    fail "CloudShell bootstrap is missing exact constant: $bootstrap_constant"
+done
+for cloudshell_readme_line in \
+  'git clone https://github.com/jakedgy/teamwork-cloud.git' \
+  'cd teamwork-cloud' \
+  'make bootstrap-cloudshell' \
+  'make preflight' \
+  'make deploy'; do
+  grep -Fqx "$cloudshell_readme_line" "$ROOT/README.md" ||
+    fail "README.md is missing exact CloudShell command: $cloudshell_readme_line"
+done
+
 for readme_guide in \
   '- [Contribution guide and clean-room rules](CONTRIBUTING.md)' \
   '- [Third-party licenses and notices](THIRD_PARTY_NOTICES.md)' \

@@ -138,10 +138,14 @@ done
 
 [[ -x "$ROOT/scripts/bootstrap-cloudshell.sh" ]] ||
   fail "scripts/bootstrap-cloudshell.sh is missing or not executable"
-grep -Eq '^bootstrap-cloudshell:[[:space:]]*$' "$ROOT/Makefile" ||
-  fail "Makefile is missing the bootstrap-cloudshell target"
-grep -Eq '^[[:space:]]*bash scripts/bootstrap-cloudshell\.sh[[:space:]]*$' "$ROOT/Makefile" ||
-  fail "bootstrap-cloudshell target does not run the expected script"
+grep -Fqx 'export PATH := $(HOME)/.local/bin:$(PATH)' "$ROOT/Makefile" ||
+  fail "Makefile does not prepend the CloudShell install directory to PATH"
+awk '
+  $0 == "bootstrap-cloudshell:" {
+    if ((getline recipe) > 0 && recipe == "\tbash scripts/bootstrap-cloudshell.sh") found = 1
+  }
+  END { exit !found }
+' "$ROOT/Makefile" || fail "bootstrap-cloudshell target does not have the exact adjacent recipe"
 for bootstrap_constant in \
   'HELM_INSTALL_VERSION=v3.15.4' \
   'HELM_ARCHIVE_SHA256=11400fecfc07fd6f034863e4e0c4c4445594673fd2a129e701fe41f31170cfa9' \
@@ -150,6 +154,8 @@ for bootstrap_constant in \
   grep -Fqx "$bootstrap_constant" "$ROOT/scripts/bootstrap-cloudshell.sh" ||
     fail "CloudShell bootstrap is missing exact constant: $bootstrap_constant"
 done
+grep -Fqx '  [[ $version != *-* ]] || return 1' "$ROOT/scripts/bootstrap-cloudshell.sh" ||
+  fail "CloudShell bootstrap does not conservatively reject prerelease versions"
 for cloudshell_readme_line in \
   'git clone https://github.com/jakedgy/teamwork-cloud.git' \
   'cd teamwork-cloud' \

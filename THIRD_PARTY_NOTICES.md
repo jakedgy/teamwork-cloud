@@ -30,4 +30,4 @@ AWS CLI, eksctl, Kubernetes, Helm, Docker, Make, Bash, OpenSSL, jq, and GitHub A
 
 ## Proprietary software boundary
 
-This repository contains no Teamwork Cloud or Web App Platform binary, WAR, chart, license material, copied UI asset, or non-public documentation. Those names only describe the inspiration for this independent simulator. No compatibility, endorsement, activation, or trademark license is claimed.
+No Teamwork Cloud or Web Application Platform binary, WAR, chart, license material, copied UI asset, or non-public documentation is distributed here. Product and company names are used only to describe the deployment topology that inspired this clearly labeled clean-room simulator. No compatibility, endorsement, activation, or trademark license is claimed.

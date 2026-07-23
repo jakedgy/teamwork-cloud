@@ -23,21 +23,32 @@ ensure_lab_dir
 split_csv "$PUBLIC_SUBNET_IDS"
 rows=$(aws ec2 describe-subnets --region "$AWS_REGION" --subnet-ids "${CSV_VALUES[@]}" --query 'Subnets[].[AvailabilityZone,SubnetId]' --output text)
 requested_count=${#CSV_VALUES[@]}
-requested_subnets=,
 seen_count=0
-seen_subnets=,
-seen_azs=,
-for requested_subnet in "${CSV_VALUES[@]}"; do
-  requested_subnets+="$requested_subnet,"
-done
+seen_subnets=()
+seen_azs=()
 if [[ -n $rows ]]; then
   while IFS=$'\t' read -r az subnet; do
     [[ -n ${az:-} && $az != None && -n ${subnet:-} ]] || die "AWS returned an incomplete subnet availability zone record"
-    [[ $requested_subnets == *",$subnet,"* ]] || die "AWS returned an unexpected subnet: $subnet"
-    [[ $seen_subnets != *",$subnet,"* ]] || die "AWS returned subnet $subnet more than once"
-    [[ $seen_azs != *",$az,"* ]] || die "Selected subnets must use distinct availability zones"
-    seen_subnets+="$subnet,"
-    seen_azs+="$az,"
+    subnet_requested=0
+    for requested_subnet in "${CSV_VALUES[@]}"; do
+      if [[ $subnet == "$requested_subnet" ]]; then
+        subnet_requested=1
+        break
+      fi
+    done
+    (( subnet_requested == 1 )) || die "AWS returned an unexpected subnet: $subnet"
+    if (( ${#seen_subnets[@]} > 0 )); then
+      for seen_subnet in "${seen_subnets[@]}"; do
+        [[ $subnet != "$seen_subnet" ]] || die "AWS returned subnet $subnet more than once"
+      done
+    fi
+    if (( ${#seen_azs[@]} > 0 )); then
+      for seen_az in "${seen_azs[@]}"; do
+        [[ $az != "$seen_az" ]] || die "Selected subnets must use distinct availability zones"
+      done
+    fi
+    seen_subnets+=("$subnet")
+    seen_azs+=("$az")
     ((seen_count += 1))
   done <<<"$rows"
 fi

@@ -448,6 +448,15 @@ new_case
 expect_ok "managed deploy parses real AWS text subnet rows" run_script deploy.sh FAKE_REAL_AWS_TEXT=1 CONFIRM=1
 
 new_case
+expect_fail "renderer rejects a composite returned subnet" run_script deploy.sh \
+  $'FAKE_AZ_ROWS=us-east-2a\tsubnet-a,subnet-b\nus-east-2b\tsubnet-b' CONFIRM=1
+if grep -Fxq '[twc-lab] ERROR: AWS returned an unexpected subnet: subnet-a,subnet-b' "$TEST_ROOT/err"; then
+  record "composite returned subnet has an exact renderer error" pass
+else
+  record "composite returned subnet has an exact renderer error" fail
+fi
+
+new_case
 expect_ok "existing deploy accepts three distinct subnet availability zones" run_script deploy.sh \
   NETWORK_MODE=existing VPC_ID=vpc-123456 \
   PUBLIC_SUBNET_IDS=subnet-a,subnet-b,subnet-c \

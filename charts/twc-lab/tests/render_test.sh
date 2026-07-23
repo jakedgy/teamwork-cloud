@@ -239,6 +239,23 @@ assert_resource_contains "$rendered" StatefulSet twc-lab-zookeeper \
 assert_resource_contains "$rendered" StatefulSet twc-lab-zookeeper \
   '^              mountPath: /data$' 'mount ZooKeeper persistent data directory'
 assert_resource_contains "$rendered" StatefulSet twc-lab-zookeeper \
+  '^      initContainers:$' 'initialize ZooKeeper persistent data before startup'
+assert_resource_contains "$rendered" StatefulSet twc-lab-zookeeper \
+  '^        - name: prepare-data$' 'name ZooKeeper data preparation container'
+assert_resource_contains "$rendered" StatefulSet twc-lab-zookeeper \
+  'mkdir -p /data/datalog && chown 1000:1000 /data /data/datalog' \
+  'create and assign ZooKeeper persistent directories to its image user'
+assert_resource_count "$rendered" StatefulSet twc-lab-zookeeper 2 \
+  '^              mountPath: /data$' \
+  'mount ZooKeeper data in both preparation and server containers'
+assert_resource_contains "$rendered" StatefulSet twc-lab-zookeeper \
+  '^            runAsUser: 0$' 'run ZooKeeper data preparation as root'
+assert_resource_contains "$rendered" StatefulSet twc-lab-zookeeper \
+  '^                - CHOWN$' 'grant ZooKeeper data preparation only chown capability'
+assert_resource_contains "$rendered" StatefulSet twc-lab-zookeeper \
+  '^            allowPrivilegeEscalation: false$' \
+  'disable privilege escalation for ZooKeeper data preparation'
+assert_resource_contains "$rendered" StatefulSet twc-lab-zookeeper \
   'ruok' 'probe ZooKeeper with ruok'
 assert_resource_contains "$rendered" StatefulSet twc-lab-zookeeper \
   'imok' 'require ZooKeeper imok response'
@@ -268,6 +285,23 @@ assert_resource_not_contains "$rendered" StatefulSet twc-lab-artemis \
   'tcpSocket:' 'do not use a bare TCP Artemis probe'
 assert_resource_contains "$rendered" StatefulSet twc-lab-artemis \
   '^              mountPath: /var/lib/artemis-instance$' 'mount Artemis persistent instance directory'
+assert_resource_contains "$rendered" StatefulSet twc-lab-artemis \
+  '^      initContainers:$' 'initialize Artemis persistent data before startup'
+assert_resource_contains "$rendered" StatefulSet twc-lab-artemis \
+  '^        - name: prepare-data$' 'name Artemis data preparation container'
+assert_resource_contains "$rendered" StatefulSet twc-lab-artemis \
+  'chown 1001:1001 /var/lib/artemis-instance' \
+  'assign Artemis persistent instance to its image user'
+assert_resource_count "$rendered" StatefulSet twc-lab-artemis 2 \
+  '^              mountPath: /var/lib/artemis-instance$' \
+  'mount Artemis data in both preparation and broker containers'
+assert_resource_contains "$rendered" StatefulSet twc-lab-artemis \
+  '^            runAsUser: 0$' 'run Artemis data preparation as root'
+assert_resource_contains "$rendered" StatefulSet twc-lab-artemis \
+  '^                - CHOWN$' 'grant Artemis data preparation only chown capability'
+assert_resource_contains "$rendered" StatefulSet twc-lab-artemis \
+  '^            allowPrivilegeEscalation: false$' \
+  'disable privilege escalation for Artemis data preparation'
 for variable in ARTEMIS_USER ARTEMIS_PASSWORD; do
   assert_resource_contains "$rendered" StatefulSet twc-lab-artemis \
     "^            - name: ${variable}$" "inject ${variable} into Artemis"

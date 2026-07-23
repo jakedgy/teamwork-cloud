@@ -42,6 +42,27 @@ spec:
       securityContext:
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        - name: prepare-data
+          image: "{{ .Values.artemis.image.repository }}:{{ .Values.artemis.image.tag }}"
+          imagePullPolicy: {{ .Values.artemis.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -ec
+            - chown 1001:1001 /var/lib/artemis-instance
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              add:
+                - CHOWN
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: false
+            runAsUser: 0
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/artemis-instance
       containers:
         - name: artemis
           image: "{{ .Values.artemis.image.repository }}:{{ .Values.artemis.image.tag }}"

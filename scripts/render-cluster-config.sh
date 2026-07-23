@@ -21,9 +21,39 @@ fi
 require_commands aws
 ensure_lab_dir
 split_csv "$PUBLIC_SUBNET_IDS"
-# shellcheck disable=SC2016 # AWS CLI JMESPath uses literal backticks.
-rows=$(aws ec2 describe-subnets --region "$AWS_REGION" --subnet-ids "${CSV_VALUES[@]}" --query 'Subnets[].join(`\t`,[AvailabilityZone,SubnetId])' --output text)
-(( $(printf '%s\n' "$rows" | sed '/^$/d' | wc -l | tr -d ' ') >= 2 )) || die "Could not discover at least two subnet availability zones"
+rows=$(aws ec2 describe-subnets --region "$AWS_REGION" --subnet-ids "${CSV_VALUES[@]}" --query 'Subnets[].[AvailabilityZone,SubnetId]' --output text)
+requested_count=${#CSV_VALUES[@]}
+seen_count=0
+seen_subnets=()
+seen_azs=()
+if [[ -n $rows ]]; then
+  while IFS=$'\t' read -r az subnet; do
+    [[ -n ${az:-} && $az != None && -n ${subnet:-} ]] || die "AWS returned an incomplete subnet availability zone record"
+    subnet_requested=0
+    for requested_subnet in "${CSV_VALUES[@]}"; do
+      if [[ $subnet == "$requested_subnet" ]]; then
+        subnet_requested=1
+        break
+      fi
+    done
+    (( subnet_requested == 1 )) || die "AWS returned an unexpected subnet: $subnet"
+    if (( ${#seen_subnets[@]} > 0 )); then
+      for seen_subnet in "${seen_subnets[@]}"; do
+        [[ $subnet != "$seen_subnet" ]] || die "AWS returned subnet $subnet more than once"
+      done
+    fi
+    if (( ${#seen_azs[@]} > 0 )); then
+      for seen_az in "${seen_azs[@]}"; do
+        [[ $az != "$seen_az" ]] || die "Selected subnets must use distinct availability zones"
+      done
+    fi
+    seen_subnets+=("$subnet")
+    seen_azs+=("$az")
+    ((seen_count += 1))
+  done <<<"$rows"
+fi
+(( seen_count == requested_count )) || die "Could not discover every requested subnet availability zone"
+(( seen_count >= 2 )) || die "Could not discover at least two subnet availability zones"
 
 tmp="$LAB_DIR/.cluster.yaml.tmp.$$"
 umask 077

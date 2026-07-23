@@ -64,7 +64,7 @@ if (( had_state == 0 )); then
 fi
 
 if [[ $NETWORK_MODE == managed ]]; then
-  if stack_status=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" --query 'Stacks[0].StackStatus' --output text 2>&1); then
+  if stack_status=$(trap - ERR; aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" --query 'Stacks[0].StackStatus' --output text 2>&1); then
     if [[ -z $VPC_STACK_ID ]]; then recover_stack_identity; else verify_stack_identity; fi
     case "$stack_status" in
       CREATE_COMPLETE|UPDATE_COMPLETE) log "Reusing identity-verified network stack $VPC_STACK_ID" ;;
@@ -114,7 +114,7 @@ fi
 chmod 600 "$SECRETS_FILE"
 
 "$SCRIPT_DIR/render-cluster-config.sh" >/dev/null
-if cluster_status=$(aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" --query 'cluster.status' --output text 2>&1); then
+if cluster_status=$(trap - ERR; aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" --query 'cluster.status' --output text 2>&1); then
   if [[ -z $CLUSTER_ARN ]]; then recover_cluster_identity; else verify_cluster_identity; fi
   log "Reusing identity-verified EKS cluster $CLUSTER_ARN"
 elif [[ $cluster_status == *ResourceNotFoundException* ]]; then

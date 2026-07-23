@@ -69,7 +69,7 @@ if [[ $NETWORK_MODE == existing ]]; then
   fi
 
   split_csv "$PUBLIC_SUBNET_IDS"
-  rows=$(aws ec2 describe-subnets --region "$AWS_REGION" --subnet-ids "${CSV_VALUES[@]}" --filters "Name=vpc-id,Values=$VPC_ID" --query "Subnets[].join(\`\\t\`,[SubnetId,AvailabilityZone,to_string(AvailableIpAddressCount),to_string(MapPublicIpOnLaunch),not_null(Tags[?Key=='kubernetes.io/role/elb']|[0].Value, \`None\`)])" --output text)
+  rows=$(aws ec2 describe-subnets --region "$AWS_REGION" --subnet-ids "${CSV_VALUES[@]}" --filters "Name=vpc-id,Values=$VPC_ID" --query "Subnets[].[SubnetId,AvailabilityZone,to_string(AvailableIpAddressCount),to_string(MapPublicIpOnLaunch),not_null(Tags[?Key=='kubernetes.io/role/elb']|[0].Value, \`None\`)]" --output text)
   requested_count=${#CSV_VALUES[@]}
   seen_count=0
   seen_csv=,
@@ -89,6 +89,10 @@ if [[ $NETWORK_MODE == existing ]]; then
     done
     (( requested_subnet == 1 )) || die "AWS returned an unexpected subnet: $subnet"
     [[ $seen_csv != *",$subnet,"* ]] || die "AWS returned subnet $subnet more than once"
+    [[ -n ${az:-} && $az != None ]] || die "AWS returned subnet $subnet without an availability zone"
+    [[ $az_csv != *",$az,"* ]] || die "Selected subnets must use distinct availability zones"
+    az_csv="${az_csv}${az},"
+    az_count=$((az_count + 1))
     if [[ ! $free_ips =~ ^[0-9]+$ ]] || (( free_ips < 16 )); then
       die "Subnet $subnet has fewer than 16 available IP addresses"
     fi
@@ -99,10 +103,6 @@ if [[ $NETWORK_MODE == existing ]]; then
     [[ $elb_role == 1 ]] || die "Subnet $subnet is missing kubernetes.io/role/elb=1"
     seen_csv="${seen_csv}${subnet},"
     seen_count=$((seen_count + 1))
-    if [[ $az_csv != *",$az,"* ]]; then
-      az_csv="${az_csv}${az},"
-      az_count=$((az_count + 1))
-    fi
   done <<<"$rows"
   (( seen_count == requested_count )) || die "Not all requested subnets exist in VPC $VPC_ID"
   (( az_count >= 2 )) || die "Existing subnets must span at least two availability zones"

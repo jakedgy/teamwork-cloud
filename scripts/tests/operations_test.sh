@@ -52,11 +52,25 @@ case "${1:-} ${2:-}" in
     ;;
   "ec2 describe-vpcs") printf '%s\n' "${FAKE_VPCS:-vpc-123456}" ;;
   "ec2 describe-subnets")
-    if [[ "$*" == *"AvailabilityZone,SubnetId"* ]]; then
+    if [[ "$*" == *"Subnets[].[AvailabilityZone,SubnetId]"* ]]; then
       printf '%b\n' "${FAKE_AZ_ROWS:-us-east-1a\tsubnet-a\nus-east-1b\tsubnet-b}"
+    elif [[ "$*" == *"AvailabilityZone,SubnetId"* ]]; then
+      if [[ "${FAKE_REAL_AWS_TEXT:-0}" == 1 ]]; then
+        printf -v rows '%b' "${FAKE_AZ_ROWS:-us-east-1a\tsubnet-a\nus-east-1b\tsubnet-b}"
+        printf '%s\n' "${rows//$'\n'/$'\t'}"
+      else
+        printf '%b\n' "${FAKE_AZ_ROWS:-us-east-1a\tsubnet-a\nus-east-1b\tsubnet-b}"
+      fi
+    elif [[ "$*" == *"Subnets[].[SubnetId,AvailabilityZone"* ]]; then
+      printf '%b\n' "${FAKE_SUBNET_ROWS:-subnet-a\tus-east-1a\t32\tTrue\t1\nsubnet-b\tus-east-1b\t32\tTrue\t1}"
     else
       [[ "$*" == *'join(`\t`'* ]] || exit 2
-      printf '%b\n' "${FAKE_SUBNET_ROWS:-subnet-a\tus-east-1a\t32\tTrue\t1\nsubnet-b\tus-east-1b\t32\tTrue\t1}"
+      if [[ "${FAKE_REAL_AWS_TEXT:-0}" == 1 ]]; then
+        printf -v rows '%b' "${FAKE_SUBNET_ROWS:-subnet-a\tus-east-1a\t32\tTrue\t1\nsubnet-b\tus-east-1b\t32\tTrue\t1}"
+        printf '%s\n' "${rows//$'\n'/$'\t'}"
+      else
+        printf '%b\n' "${FAKE_SUBNET_ROWS:-subnet-a\tus-east-1a\t32\tTrue\t1\nsubnet-b\tus-east-1b\t32\tTrue\t1}"
+      fi
     fi
     ;;
   "ec2 describe-route-tables")
@@ -86,7 +100,7 @@ case "${1:-} ${2:-}" in
       *"twc-lab:deployment-id"*) printf '%s\n' "${FAKE_STACK_DEPLOYMENT_ID:-0123456789abcdef0123456789abcdef}" ;;
       *"StackId"*) printf '%s\n' "${FAKE_STACK_ID:-arn:aws:cloudformation:us-east-1:111122223333:stack/twc-lab-vpc/stack123}" ;;
       *"OutputKey=='VpcId'"*) printf '%s\n' "${FAKE_VPC_OUTPUT:-vpc-managed}" ;;
-      *"OutputKey=='PublicSubnetIds'"*) printf '%s\n' "${FAKE_SUBNET_OUTPUT:-subnet-ma,subnet-mb}" ;;
+      *"OutputKey=='PublicSubnetIds'"*) printf '%s\n' "${FAKE_SUBNET_OUTPUT:-subnet-a,subnet-b}" ;;
       *) printf '%s\n' "${FAKE_STACK_STATUS:-CREATE_COMPLETE}" ;;
     esac
     ;;
@@ -366,7 +380,36 @@ new_case
 expect_fail "existing mode requires exactly one matching VPC" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b $'FAKE_VPCS=vpc-123456\tvpc-other'
 
 new_case
+expect_ok "existing preflight parses real AWS text subnet rows" run_script preflight.sh \
+  NETWORK_MODE=existing VPC_ID=vpc-123456 \
+  PUBLIC_SUBNET_IDS=subnet-a,subnet-b,subnet-c \
+  $'FAKE_SUBNET_ROWS=subnet-a\tus-east-1a\t32\tTrue\t1\nsubnet-b\tus-east-1b\t32\tTrue\t1\nsubnet-c\tus-east-1c\t32\tTrue\t1' \
+  FAKE_REAL_AWS_TEXT=1
+
+new_case
+expect_fail "existing preflight rejects a missing subnet availability zone" run_script preflight.sh \
+  NETWORK_MODE=existing VPC_ID=vpc-123456 \
+  PUBLIC_SUBNET_IDS=subnet-a,subnet-b \
+  $'FAKE_SUBNET_ROWS=subnet-a\tNone\t32\tTrue\t1\nsubnet-b\tus-east-1b\t32\tTrue\t1'
+if grep -Fxq '[twc-lab] ERROR: AWS returned subnet subnet-a without an availability zone' "$TEST_ROOT/err"; then
+  record "missing subnet availability zone has an exact error" pass
+else
+  record "missing subnet availability zone has an exact error" fail
+fi
+
+new_case
 expect_fail "existing subnets must span AZs" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b $'FAKE_SUBNET_ROWS=subnet-a\tus-east-1a\t32\tTrue\t1\nsubnet-b\tus-east-1a\t32\tTrue\t1'
+
+new_case
+expect_fail "existing subnets cannot share an availability zone" run_script preflight.sh \
+  NETWORK_MODE=existing VPC_ID=vpc-123456 \
+  PUBLIC_SUBNET_IDS=subnet-a,subnet-b,subnet-c \
+  $'FAKE_SUBNET_ROWS=subnet-a\tus-east-1a\t32\tTrue\t1\nsubnet-b\tus-east-1a\t32\tTrue\t1\nsubnet-c\tus-east-1b\t32\tTrue\t1'
+if grep -Fxq '[twc-lab] ERROR: Selected subnets must use distinct availability zones' "$TEST_ROOT/err"; then
+  record "duplicate subnet availability zone has a clear error" pass
+else
+  record "duplicate subnet availability zone has a clear error" fail
+fi
 
 new_case
 expect_fail "existing subnets need sixteen free IPs" run_script preflight.sh NETWORK_MODE=existing VPC_ID=vpc-123456 PUBLIC_SUBNET_IDS=subnet-a,subnet-b $'FAKE_SUBNET_ROWS=subnet-a\tus-east-1a\t15\tTrue\t1\nsubnet-b\tus-east-1b\t32\tTrue\t1'
@@ -385,6 +428,11 @@ expect_fail "existing subnets carry public ELB role tags" run_script preflight.s
 
 new_case
 expect_ok "managed deploy succeeds with fake CLIs" run_script deploy.sh CONFIRM=1
+if ! grep -Fq 'Command failed at line' "$TEST_ROOT/err"; then
+  record "expected deploy absence probes stay quiet" pass
+else
+  record "expected deploy absence probes stay quiet" fail
+fi
 assert_order "managed stack precedes cluster creation" "aws cloudformation deploy" "eksctl create cluster"
 assert_order "cluster precedes ingress installation" "eksctl create cluster" "helm upgrade --install ingress-nginx"
 assert_order "ingress precedes app installation" "helm upgrade --install ingress-nginx" "helm upgrade --install twc-lab"
@@ -400,6 +448,53 @@ if grep -Fq 'nodePools:' "$CASE_DIR/.twc-lab/cluster.yaml" && grep -Fq 'general-
 if grep -Fq 'twc-lab:deployment-id: 0123456789abcdef0123456789abcdef' "$CASE_DIR/.twc-lab/cluster.yaml"; then record "renderer requests cluster ownership tag atomically" pass; else record "renderer requests cluster ownership tag atomically" fail; fi
 if grep -Fq 'http://lab.example.test/webapp' "$TEST_ROOT/out" && grep -Fq 'http://lab.example.test/admin' "$TEST_ROOT/out" && grep -Fq 'http://lab.example.test/admin/license' "$TEST_ROOT/out" && ! grep -Fq '/authentication' "$TEST_ROOT/out"; then record "deploy prints the required three URLs" pass; else record "deploy prints the required three URLs" fail; fi
 if ! grep -Fq 'simulator.image.repository' "$CALLS" && ! grep -Fq 'simulator.image.tag' "$CALLS"; then record "default deploy leaves simulator image values unchanged" pass; else record "default deploy leaves simulator image values unchanged" fail; fi
+
+new_case
+expect_ok "managed deploy parses real AWS text subnet rows" run_script deploy.sh FAKE_REAL_AWS_TEXT=1 CONFIRM=1
+
+new_case
+expect_fail "renderer rejects a composite returned subnet" run_script deploy.sh \
+  $'FAKE_AZ_ROWS=us-east-1a\tsubnet-a,subnet-b\nus-east-1b\tsubnet-b' CONFIRM=1
+if grep -Fxq '[twc-lab] ERROR: AWS returned an unexpected subnet: subnet-a,subnet-b' "$TEST_ROOT/err"; then
+  record "composite returned subnet has an exact renderer error" pass
+else
+  record "composite returned subnet has an exact renderer error" fail
+fi
+
+new_case
+expect_ok "existing deploy accepts three distinct subnet availability zones" run_script deploy.sh \
+  NETWORK_MODE=existing VPC_ID=vpc-123456 \
+  PUBLIC_SUBNET_IDS=subnet-a,subnet-b,subnet-c \
+  $'FAKE_SUBNET_ROWS=subnet-a\tus-east-1a\t32\tTrue\t1\nsubnet-b\tus-east-1b\t32\tTrue\t1\nsubnet-c\tus-east-1c\t32\tTrue\t1' \
+  $'FAKE_AZ_ROWS=us-east-1a\tsubnet-a\nus-east-1b\tsubnet-b\nus-east-1c\tsubnet-c' \
+  FAKE_REAL_AWS_TEXT=1 CONFIRM=1
+
+new_case
+expect_fail "renderer rejects an omitted requested subnet" run_script deploy.sh \
+  $'FAKE_AZ_ROWS=us-east-1a\tsubnet-a' CONFIRM=1
+if grep -Fxq '[twc-lab] ERROR: Could not discover every requested subnet availability zone' "$TEST_ROOT/err"; then
+  record "omitted subnet has an exact renderer error" pass
+else
+  record "omitted subnet has an exact renderer error" fail
+fi
+
+new_case
+expect_fail "renderer rejects a duplicate returned subnet" run_script deploy.sh \
+  $'FAKE_AZ_ROWS=us-east-1a\tsubnet-a\nus-east-1b\tsubnet-a' CONFIRM=1
+if grep -Fxq '[twc-lab] ERROR: AWS returned subnet subnet-a more than once' "$TEST_ROOT/err"; then
+  record "duplicate returned subnet has an exact renderer error" pass
+else
+  record "duplicate returned subnet has an exact renderer error" fail
+fi
+
+new_case
+expect_fail "renderer rejects multiple subnets in one availability zone" run_script deploy.sh \
+  $'FAKE_AZ_ROWS=us-east-1a\tsubnet-a\nus-east-1a\tsubnet-b' CONFIRM=1
+if grep -Fxq '[twc-lab] ERROR: Selected subnets must use distinct availability zones' "$TEST_ROOT/err"; then
+  record "duplicate availability zone has an exact renderer error" pass
+else
+  record "duplicate availability zone has an exact renderer error" fail
+fi
 
 new_case
 expect_fail "simulator image repository requires a tag" run_script deploy.sh SIMULATOR_IMAGE_REPOSITORY=ghcr.io/jakedgy/teamwork-cloud CONFIRM=1

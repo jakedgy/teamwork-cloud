@@ -25,7 +25,7 @@ simulator:
 cassandra:
   image:
     repository: cassandra
-    tag: "4.1.11"
+    tag: "4.1.12"
     pullPolicy: IfNotPresent
   resources:
     requests:
